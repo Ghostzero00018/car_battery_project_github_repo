@@ -1,0 +1,78 @@
+# ---- OS junk ----
+.DS_Store
+Thumbs.db
+ehthumbs.db
+Icon?
+._*
+
+# ---- Archives / temp ----
+*.log
+*.tmp
+*.temp
+*.bak
+*.swp
+*.swo
+*.orig
+*.cache/
+cache/
+tmp/
+~$*
+
+# ---- Python ----
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.ipynb_checkpoints/
+.venv/
+venv/
+env/
+.pytest_cache/
+.mypy_cache/
+.pytype/
+dist/
+build/
+site/
+
+# ---- Jupyter artifacts ----
+.profile
+.ipynb_checkpoints/
+*.nbconvert.ipynb
+
+# ---- Node / web ----
+node_modules/
+npm-debug.log*
+yarn-error.log*
+.pnpm-store/
+dist/
+build/
+.next/
+out/
+
+# ---- Editors / IDEs ----
+.vscode/
+.history/
+.idea/
+*.iml
+
+# ---- Arduino / PlatformIO (if you use them) ----
+.pio/
+.piolibdeps/
+*.elf
+*.hex
+
+# ---- MATLAB/Simulink (if any) ----
+*.asv
+*.mexa64
+*.mexmaci64
+*.mexw64
+
+# ---- Data you don’t want in git (uncomment as needed) ----
+# data/
+# *.csv
+# *.parquet
+
+# ---- Large binaries (consider Git LFS) ----
+# Track big PDFs or binaries with LFS instead of ignoring them:
+# .gitattributes example:
+# *.pdf filter=lfs diff=lfs merge=lfs -text
