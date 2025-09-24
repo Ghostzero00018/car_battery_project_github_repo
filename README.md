@@ -5,6 +5,7 @@ Thermal control testbed for a compact battery enclosure. This repo gathers model
 ---
 
 ## 🚀 Goals
+
 - Size airflow & heating power to reach/hold target temperatures with <1% overshoot.
 - Study the effect of **single intake + leak** vs **side vents** on temperature and pressure.
 - Select and control a **12 V Sunon axial fan** (PWM/voltage), and log **pressure/temperature**.
