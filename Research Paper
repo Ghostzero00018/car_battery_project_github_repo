@@ -1,0 +1,242 @@
+\documentclass[11pt,a4paper]{article}
+
+% ---------- Packages ----------
+\usepackage[margin=1in]{geometry}
+\usepackage{amsmath, amssymb}
+\usepackage{siunitx}
+\sisetup{detect-all}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{caption}
+\usepackage{subcaption}
+\usepackage{hyperref}
+\usepackage{enumitem}
+\setlist{nosep}
+
+\hypersetup{
+  colorlinks=true,
+  linkcolor=black,
+  urlcolor=blue,
+  citecolor=black,
+  pdfauthor={Harish TANNIRA,Yin LI, Zhiyan PIAO, Yinpu CHEN, Erk CAYHAN},
+  pdftitle={Heating & Drying in an 8-L Insulated Box}
+}
+
+\sisetup{
+  detect-all,
+  per-mode=symbol,
+  separate-uncertainty = true
+}
+
+% ---------- Title ----------
+\title{\textbf{Heating \& Drying in an 8-L Insulated Box}\\
+\large Cascade Temperature Control with Smart air flow }
+\author{Harish TANNIRA,Yin LI, Zhiyan PIAO, Yinpu CHEN, Erk CAYHAN\\ \small Course: \textit{Research Project/ MATLAB Simulation Part} }
+\date{\small 26/09/2025}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+This project studies how to heat and dry a coated metal strip inside a small \SI{8}{L} insulated box. The target is to reach a chosen product \textbf{core temperature} (e.g., \SI{65}{\celsius}) while keeping the \textbf{medium box air} at or below \SI{70}{\celsius} to protect the ink and the metal plate and to prevent fire hazard and box material polyurethane. A low-order thermal model is used: a well-mixed air node, a lumped wall node, and a \textbf{half-thickness} 1-D conduction model of the product to simply simulation. A \textbf{cascade controller} is designed: an outer loop sets the air temperature setpoint from the core error, and an inner PID loop drives the heater. A ``smart air flow '' supervisor controls inlet/outlet based on heating, tracking, or safety needs. 
+The final code avoids numerical crashes using rate limits, derivative filtering / capping, and cold-run guards. The results show stable heating, realistic air flow (g/s) and safe operation. The target set to be core at \SI{65}{\celsius} unfortunately due to heater power limitations and the heat loss target cannot be reached. From the simulation the last temperature reading for ink coating and metal plate is \SI{61}{\celsius}.
+\end{abstract}
+
+\section{Objectives}
+\begin{enumerate}
+  \item Reach and hold a\textbf{stable product core temperature}.
+  \item Enforce an \textbf{air temperature cap} $\le \SI{70}{\celsius}$.
+  \item Air flow must be \textbf{realistic} and measurable range (g/s).
+  \item Clear plots required for: product temps, air vs.\ setpoint, heater/fan usage, per-port flows, total flow \& $\Delta p$, and a through-thickness heat map.
+  \item Controller used for simulation must be that ported to embedded hardware to switch prototype phase.
+\end{enumerate}
+
+\section{System Overview}
+\subsection{Geometry \& Materials}
+\begin{itemize}
+  \item Polyurethane box: about \SI{0.2}{m} $\times$ \SI{0.2}{m} $\times$ \SI{0.2}{m} (\(\approx \SI{8}{L}\)).
+  \item Product: metal plate with a thin paint layer, modeled as a slab across \textbf{half the thickness}.
+  \item Ports: two inlets + two outlets with controllable effective discharge area $C_dA$.
+\end{itemize}
+
+\subsection{Sensors \& Actuators}
+\begin{itemize}
+  \item Sensors: air temperature, product surface \& core (mid-plane), pressure differential (as a proxy).
+  \item Actuators: electric heater $Q$, fan (crearecirculation which raises $h$), and four valves (in1, in2, out1, out2).
+\end{itemize}
+
+\section{Thermal Model (low order)}
+\subsection{Nodes and balances}
+\textbf{Air (well-mixed):}
+\begin{equation}
+m_{\text{air}} c_p \frac{dT_{\text{air}}}{dt} =
+Q - h_{\text{prod}}A_{\text{prod}}(T_{\text{air}} - T_{\text{surf}})
+- \dot{m}\,c_p\,(T_{\text{air}}-T_{\text{amb}})
+- h_{\text{aw}}A_{\text{wall}}(T_{\text{air}}-T_{\text{wall}}).
+\label{eq:air}
+\end{equation}
+
+\textbf{Wall (lumped):}
+\begin{equation}
+m_{\text{wall}} c_{\text{wall}} \frac{dT_{\text{wall}}}{dt} =
+q_{\text{rad}} + h_{\text{aw}}A_{\text{wall}}(T_{\text{air}}-T_{\text{wall}})
+- U_{\text{loss}}(T_{\text{wall}}-T_{\text{amb}}).
+\end{equation}
+
+\textbf{Product (1-D, half thickness):} explicit finite difference with $N$ layers; adiabatic mid-plane. Surface flux includes convection and radiation:
+\begin{equation}
+q_{\text{rad}}=\varepsilon \sigma A_{\text{prod}} \Big((T_{\text{surf}}+273.15)^4 - (T_{\text{wall}}+273.15)^4\Big).
+\end{equation}
+
+\subsection{Air Flow Model}
+Each port uses an effective discharge area $C_dA$. Total air flow  is driven by a target $\Delta p$; inlets and outlets move together but with a slight bias (more outlet opening due to exhaust gas) near the air cap for safety. Mass balance is enforced:
+\(\sum \dot{m}{\text{in}} = \sum \dot{m}{\text{out}}\).
+
+\section{Control Design}
+\subsection{Cascade structure}
+\textbf{Outer loop (core $\rightarrow$ air setpoint).} Proportional + small integral, anti-windup, and a \textbf{rate limit} on $T_{\text{air,set}}$. The integrator freezes near the cap to avoid fighting safety limits.
+
+\textbf{Inner loop (air $\rightarrow$ heater).} PID with \textbf{filtered derivative} and a derivative cap. Heater command has a \textbf{slew-rate limit}.
+
+\subsection{Smart air flow  Supervisor}
+Smoothly blends three regimes using weights:
+\begin{itemize}
+  \item \textbf{Heat-up:} higher air flow  to keep the box safe early.
+  \item \textbf{Track/Hold:} moderate air flow .
+  \item \textbf{Safety/Vent:} near the air cap, open outlets more and raise air flow .
+\end{itemize}
+A minimum air flow  is always kept; valve moves are rate-limited.
+
+\subsection{Stability / Safety Guards}
+\begin{itemize}
+  \item D-term filtering and \textbf{cap} (no giant negative spikes).
+  \item \textbf{Rate limit} on $dT_{\text{air}}/dt$ to prevent unrealistic jumps.
+  \item \textbf{Kelvin floor} in radiation to keep $(\cdot)^4$ well-behaved.
+  \item \textbf{Cold-runaway guards:} if $T_{\text{air}}<T_{\text{amb}}$, hold minimum air flow  and heater.
+  \item Setpoint clamped to \SI{40}{\celsius}--$T_{\text{cap}}$ and rate-limited with anti-windup.
+\end{itemize}
+
+\section{Simulation Setup}
+\subsection{Key Parameters (example)}
+\begin{itemize}
+  \item Heater: $Q_{\max}=\SI{60}{W}$.
+  \item Cap: $T_{\text{air,cap}}=\SI{70}{\celsius}$; ambient $T_{\text{amb}}=\SI{25}{\celsius}$.
+  \item air flow  targets: heat-up $\sim \SI{1}{g/s}$, hold $\sim \SI{3}{g/s}$, safety up to $\sim \SI{8}{g/s}$ (the controller only uses what is needed).
+  \item Fan duty $0.4\rightarrow1.0$; increases $h$.
+  \item Product: $A=\SI{0.015}{m^2}$, total thickness \SI{10}{mm}, $N=3$ layers (half-thickness model).
+\end{itemize}
+
+\subsection{Solver}
+MATLAB \texttt{ode15s}, \(\text{RelTol}=10^{-6}\), \(\text{AbsTol}=10^{-7}\), \(\text{MaxStep}=\SI{0.25}{s}\).
+
+\section{Tuning (practical)}
+\begin{enumerate}
+  \item Tune the \textbf{inner} heater loop first: increase $K_p$, add $K_i$ until air tracks well, then add small $K_d$ and adjust the derivative filter for smoothness (keep D-cap on).
+  \item Tune the \textbf{outer} loop next: modest $K_p$ + small $K_i$. Always keep a rate limit on $T_{\text{air,set}}$.
+  \item Choose air flow  levels that give flows in \textbf{g/s}, not kg/s. Check that total air flow  and $\Delta p$ look realistic.
+  \item If you see oscillation: reduce $K_d$, slow the setpoint rate, or adjust slew limits.
+\end{enumerate}
+
+\section{Results}
+\begin{figure}[h!]
+  \centering
+  \includegraphics[width=0.9\linewidth]{fig_product_temps.png}
+  \caption{Product temperatures: core and surface vs.\ time with the target line.}
+\end{figure}
+
+\begin{figure}[h!]
+  \centering
+  \includegraphics[width=0.9\linewidth]{fig_air_control.png}
+  \caption{Air temperature control: $T_{\text{air}}$, $T_{\text{air,set}}$, and cap.}
+\end{figure}
+
+\begin{figure}[h!]
+  \centering
+  \includegraphics[width=0.9\linewidth]{fig_heater_fan.png}
+  \caption{Heater power (left axis) and fan duty (right axis).}
+\end{figure}
+
+\begin{figure}[h!]
+  \centering
+  \begin{subfigure}{0.9\linewidth}
+    \centering
+    \includegraphics[width=\linewidth]{fig_inlet_flows.png}
+    \caption{Inlet flows (smoothed).}
+  \end{subfigure}\\[0.75em]
+  \begin{subfigure}{0.9\linewidth}
+    \centering
+    \includegraphics[width=\linewidth]{fig_outlet_flows.png}
+    \caption{Outlet flows (smoothed).}
+  \end{subfigure}\\[0.75em]
+  \begin{subfigure}{0.9\linewidth}
+    \centering
+    \includegraphics[width=\linewidth]{fig_total_flow_dp.png}
+    \caption{Total air flow  and $\Delta p$ (smoothed).}
+  \end{subfigure}
+  \caption{Flows and pressure.}
+\end{figure}
+
+\begin{figure}[h!]
+  \centering
+  \includegraphics[width=0.9\linewidth]{fig_heatmap.png}
+  \caption{Through-thickness heat map for the half-thickness slab.}
+\end{figure}
+
+\section{Sensitivity \& Limits}
+\textbf{Heater power} is the main limiter. With \SI{60}{W} and a steady air flow  near \SI{3}{g/s}, steady air settles near \SI{61}--\SI{62}{\celsius}, and the core tracks closely. Lower air flow  raises temperature; higher air flow  cools it. Better insulation (lower $U_{\text{loss}}$) or a higher safe cap would also raise the maximum.
+
+\section{Implementation Plan (real hardware)}
+\begin{enumerate}
+  \item \textbf{Calibrate}: valve duty $\rightarrow$ flow ($C_dA$), fan duty $\rightarrow h$ gain, heater PWM $\rightarrow$ watts.
+  \item \textbf{Safety}: hard over-temperature cutoff, door switch, fuse.
+  \item \textbf{Controllers}: same cascade with the same rate limits and guards.
+  \item \textbf{Commissioning order}: short pre-air flow  (higher flow), enable inner loop, then outer loop; tune gently.
+  \item \textbf{Logging}: record temperatures, flows, heater/fan duty to compare with the model.
+\end{enumerate}
+
+\section{Limitations \& Future Work}
+The air and wall are lumped, so hot spots are not captured. The air flow  model uses effective $C_dA$, so real ducting and fan curves will change scaling. A simple feed-forward on the heater (based on a desired ramp rate) could reduce integral action. Adding paint thermal resistance explicitly (film + half-thickness) would improve fidelity.
+
+\section{Conclusions}
+A simple cascade controller plus a smart air flow  policy can heat and hold a coated product safely in a small box while respecting an air cap. With \SI{60}{W} and moderate air flow , physics limits steady air to the low \SI{60}{\celsius}. The final code is numerically stable, respects safety caps, and gives clean diagnostics that are useful for real implementation.
+
+\section*{References}
+\begin{enumerate}
+  \item Standard heat transfer relations for convection/radiation (e.g., Incropera).
+  \item Basic control references for PID anti-windup and cascade control.
+\end{enumerate}
+
+\appendix
+
+\section{Key Equations}
+Air node (Eq.~\ref{eq:air}); radiation in Kelvin with a temperature floor; explicit 1D conduction scheme with adiabatic mid-plane; air flow $\dot m \propto C_dA \sqrt{2\Delta p/\rho}$ with enforced mass balance.
+
+\section{Main Parameters (fill with your final values)}
+\begin{table}[h!]
+\centering
+\begin{tabular}{@{}lll@{}}
+\toprule
+Symbol & Meaning & Value / Units \\
+\midrule
+$Q_{\max}$ & Max heater power & \SI{60}{W} \\
+$T_{\text{amb}}$ & Ambient temperature & \SI{25}{\celsius} \\
+$T_{\text{air,cap}}$ & Air temperature cap & \SI{70}{\celsius} \\
+$A_{\text{prod}}$ & Product area & \SI{0.015}{m^2} \\
+thickness & Total thickness & \SI{10}{mm} \\
+$N$ & Layers (half thickness) & $3$ \\
+$\varepsilon$ & Emissivity & $0.8$ \\
+$U_{\text{loss}}$ & Box leakage & \SI{1}{W/K} \\
+air flow  (hold) & Target total & $\sim \SI{3}{g/s}$ \\
+\bottomrule
+\end{tabular}
+\caption{Key parameters used in the final simulation.}
+\end{table}
+
+\section{Reproduction Checklist}
+\begin{itemize}
+  \item MATLAB R20xx, code file: \texttt{ULTIMATE\_OVEN\_8L\_FINAL\_SMOOTH\_KP\_SAFE.m}.
+  \item Solver: \texttt{ode15s}; tolerances as listed.
+  \item Export plots as PNGs with names used in this document and place them next to the \texttt{.tex} file.
+\end{itemize}
+
+\end{document}
