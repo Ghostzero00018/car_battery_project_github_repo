@@ -1,1 +1,1 @@
-For the code in this folder please run them using Matlab, preferably Matlab 2024b or later version.
+For the code (you can copy-paste the codes in txt. file and create a new m. file in Matlab to run it) in this folder please run them using Matlab, preferably Matlab 2024b or later version.
