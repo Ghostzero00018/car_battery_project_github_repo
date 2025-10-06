@@ -3,7 +3,7 @@
 ## IMT Nord Europe — DNM–DMI 2025–2026
 
 A compact **thermal control project** combining simulation, control design, and embedded implementation.  
-The goal: heat and dry a coated metal plate in a small **8 L hotbox** while keeping air ≤ 70 °C for safety.
+The goal: heat and dry a coated metal plate in a small **8 L hotbox** while keeping air ≤ 70 °C (but higher than 60 °C)for safety.
 
 ---
 
