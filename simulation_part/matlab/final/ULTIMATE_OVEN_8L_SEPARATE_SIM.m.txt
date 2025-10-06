@@ -1,0 +1,628 @@
+function ULTIMATE_OVEN_8L_SEPARATE_SIM
+% 8 L oven — continuous phase blend + stable hold + wall losses.
+% Slower warm-up preset:
+% - Long soft-start (900 s), shallow heater slew, extra air inertia
+% - Lower convective h to product at start, more purge during heat-up
+% - Smooth A→B transition and hold floor near 65 °C (or 62 °C by toggle)
+
+close all; clc;
+
+%% ---------------- Optional: Calibration helper flags (safe, offline) -------------
+CALIB.ENABLE = false;   % false = no calibration work (default, safe)
+CALIB.APPLY  = false;   % if true, apply suggested params back to P (not recommended)
+CALIB.verbose = true;
+
+% Target flow at hold (for Δp_max suggestion if CALIB.ENABLE=true)
+CALIB.target_hold_total_gps = 0.75;   % g/s (example; not used unless CALIB.ENABLE)
+
+% Valve geometry for angle plot & CdA sanity (display only)
+VALVE.geom.D_mm = 38.5;   % disc/port diameter, mm
+
+%% ---------------- Tunables (edit here if needed) ----------------
+% ---------------- Target & overall duration ----------------
+Tset_core     = 65;          % °C core target (Preset: 65 °C)
+t_total       = 3600+1800;   % s (heat + hold)
+
+% --- If you want ~62 °C hold instead, uncomment these 3 lines: ---
+% Tset_core     = 62;        % core target 62 °C
+% Tair_cap      = 70;        % keep cap high, air floor set below
+% B_min_air_sp  = 8.0;       % T_air,set floor = 70 - 8 = 62 °C
+% ---------------------------------------------------------------
+
+%% ---------------- Air setpoint cap (and default hold floor) -------
+Tair_cap      = 69;          % °C hard cap (Preset for 65 °C hold)
+Tair_soft     = 69.5;        % °C soft threshold
+air_cap_margin= 1.2;         % °C safety margin near cap
+
+% Hold floor: keeps T_air,set >= (cap - B_min_air_sp)
+B_min_air_sp    = 4.0;       % 69 - 4 = 65 °C floor in Phase-B
+B_outer_rate    = 0.15;      % °C/s max outer rate during hold
+B_core_deadband = 0.5;       % °C freeze outer integral inside this band
+
+%% ---------------- Geometry / Physics ----------------
+V_box = 0.008;                 % m^3 (8 L)
+A_wall= 0.24;                  % m^2 inner area exchanging with air
+Tamb  = 25;                    % °C ambient
+
+% Product half-thickness slab
+A_batt=0.015;  thick_total=0.010;  rho_batt=2000;  cp_batt=900;  k_batt=1.0;  N_nodes=3;
+
+% Wall & leakage (W/K → ambient)
+h_airwall0=5;  m_wall=0.5;  cp_wall=1400;  U_loss=1.2;  % door leaks + insulation losses
+
+% Radiation surface→wall
+eps_batt=0.80; sigma=5.670374419e-8; A_rad=A_batt;
+
+% Air
+cp_air=1005; rho_air=1.2; m_air=rho_air*V_box;
+
+% Fan (affects h only) — lowered for slower warm-up
+fan_W_max=30; h_base=15; h_fan_gain=15; fan_min=0.30; fan_tau=2.5;
+
+% Ports (2 in, 2 out)
+CdA_in1_min=6e-5; CdA_in1_max=4e-4;
+CdA_in2_min=6e-5; CdA_in2_max=4e-4;
+CdA_out1_min=6e-5; CdA_out1_max=4e-4;
+CdA_out2_min=6e-5; CdA_out2_max=4e-4;
+
+% Δp PI + dynamics (gentle to avoid chatter)
+Kp_dp=0.6; Ki_dp=0.25; dP_max=250; tau_dp=6.0;
+
+%% ---------------- Controls ----------------
+% Heater limit
+Qmax = 60; Qmin = 0;             % W
+
+% Inner air PID (tamed D)
+Kp_air=28; Ki_air=7; Kd_air=0.6; Kaw_air=0.6; tauD_air=5.0; Dterm_W_cap=40;
+
+% Setpoint/actuator dynamics (slower actuator)
+tau_Q=8.0; Q_slew=18;                 % heater actuator
+tau_Tsp=1.8; airsp_rate=0.8;          % outer setpoint base rate (°C/s)
+dTair_degps=1.2; cap_freeze_band=0.3; % air slope cap (°C/s)
+
+% Outer core->air loop
+Kp_core=2.0; Ki_core=0.03; Kaw_core=0.5; deadband_core=0.2;
+
+% Valve dynamics
+tau_flow=8.0; u_slew=0.03; softcap_bump=0.02;
+
+%% ---------------- Purge governor ----------------
+% Phase-specific purge (kg/s) — more purge during heat-up to slow warm-up
+A_mdot_min=2.0e-4; A_mdot_heat=1.5e-3;      % Phase A near-closed but with heat-up purge
+B_mdot_min=2.0e-4; B_mdot_track=1.6e-3;     % Phase B: trimming authority
+mdot_max  =8.0e-3;                           % safety vent ceiling
+
+% Utilization gating
+util_on   = 0.50;    % allow more purge if utilization < 50%
+util_off  = 0.78;    % block purge if utilization > 78%
+cap_margin_ok = 0.8; % °C margin below cap needed to allow more purge
+core_band = 0.6;     % °C band around target to allow raising purge
+
+%% ---------------- Soft-start (EVEN SLOWER preset) ----------------
+soft_start_s        = 900;   % 15 min power/setpoint/slope ramp
+Qmax_soft_frac      = 0.25;  % start at 25% of Qmax and ramp to 100%
+airsp_soft          = 0.06;  % °C/s setpoint ramp at t=0
+dTair_degps_soft    = 0.15;  % °C/s air slope cap at t=0
+
+% Extra air-side heat capacity (adds inertia to air node)
+C_air_extra         = 400;   % J/K (try 300–500 if you want even slower air)
+
+%% ---------------- Smooth phase blend (no hard switch) ------------
+phase_width_C = 0.8;   % °C width of transition window (core near target)
+tau_phase     = 8.0;   % s response of phi to its target (0→1)
+reach_margin  = 0.2;   % °C center offset for transition
+
+%% -------------- Derived / ICs --------------
+thick_half=0.5*thick_total; dx=thick_half/N_nodes;
+T0_air=Tamb; T0_layers=ones(N_nodes,1)*Tamb; T0_wall=Tamb;
+I_air0=0; Tair_sp0=Tamb+10; I_core0=0; I_dp0=0;
+u0=[0.35 0.35 0.35 0.35]'; Q0=0; fan0=0.55; eD_air0=0; dP0=0;
+phi0=0; % phase-blend state
+x0=[T0_air; T0_layers; T0_wall; I_air0; Tair_sp0; I_core0; I_dp0; u0; Q0; fan0; eD_air0; dP0; phi0];
+
+%% -------------- Pack params --------------
+P = struct();
+P.cp_air=cp_air; P.rho_air=rho_air; P.Tamb=Tamb;
+P.V_box=V_box; P.m_air=m_air; P.A_wall=A_wall;
+P.A_batt=A_batt; P.thick_half=thick_half; P.dx=dx;
+P.rho_batt=rho_batt; P.cp_batt=cp_batt; P.k_batt=k_batt;
+P.eps_batt=eps_batt; P.sigma=sigma; P.A_rad=A_rad;
+P.h_airwall0=h_airwall0; P.m_wall=m_wall; P.cp_wall=cp_wall; P.U_loss=U_loss;
+P.Qmin=Qmin; P.Qmax=Qmax;
+P.Kp_air=Kp_air; P.Ki_air=Ki_air; P.Kd_air=Kd_air; P.Kaw_air=Kaw_air;
+P.tauD_air=tauD_air; P.Dterm_W_cap=Dterm_W_cap; P.dTair_degps=dTair_degps;
+P.Kp_core=Kp_core; P.Ki_core=Ki_core; P.Kaw_core=Kaw_core;
+P.deadband_core=deadband_core; P.airsp_rate=airsp_rate; P.cap_freeze_band=cap_freeze_band;
+P.tau_Q=tau_Q; P.Q_slew=Q_slew; P.tau_Tsp=tau_Tsp;
+P.fan_min=fan_min; P.fan_tau=fan_tau; P.h_base=h_base; P.h_fan_gain=h_fan_gain; P.fan_W_max=fan_W_max;
+P.CdA_in1_min=CdA_in1_min; P.CdA_in1_max=CdA_in1_max;
+P.CdA_in2_min=CdA_in2_min; P.CdA_in2_max=CdA_in2_max;
+P.CdA_out1_min=CdA_out1_min; P.CdA_out1_max=CdA_out1_max;
+P.CdA_out2_min=CdA_out2_min; P.CdA_out2_max=CdA_out2_max;
+P.Kp_dp=Kp_dp; P.Ki_dp=Ki_dp; P.dP_max=dP_max; P.tau_dp=tau_dp;
+P.Tair_cap=Tair_cap; P.Tair_soft=Tair_soft; P.air_cap_margin=air_cap_margin; P.softcap_bump=softcap_bump;
+P.tau_flow=tau_flow; P.u_slew=u_slew;
+P.N=N_nodes; P.Tset_core=Tset_core;
+P.A_mdot_min=A_mdot_min; P.A_mdot_heat=A_mdot_heat;
+P.B_mdot_min=B_mdot_min; P.B_mdot_track=B_mdot_track; P.mdot_max=mdot_max;
+P.util_on=util_on; P.util_off=util_off; P.cap_margin_ok=cap_margin_ok; P.core_band=core_band;
+P.soft_start_s=soft_start_s; P.Qmax_soft_frac=Qmax_soft_frac;
+P.airsp_soft=airsp_soft; P.dTair_degps_soft=dTair_degps_soft; P.C_air_extra=C_air_extra;
+P.phase_width_C=phase_width_C; P.tau_phase=tau_phase; P.reach_margin=reach_margin;
+P.B_min_air_sp=B_min_air_sp; P.B_outer_rate=B_outer_rate; P.B_core_deadband=B_core_deadband;
+
+%% -------------- Solve --------------
+opts = odeset('RelTol',1e-6,'AbsTol',1e-7,'MaxStep',0.2);
+[t,X] = ode15s(@(t,x) ode_oven(t,x,P), [0 t_total], x0, opts);
+
+%% -------------- Unpack --------------
+N=P.N; T_air=X(:,1); Tb=X(:,2:1+N); T_core=Tb(:,end); T_surf=Tb(:,1);
+Tair_sp=X(:,4+N); Q=X(:,11+N); fan_cmd=X(:,12+N); dP_meas=X(:,14+N); phi=X(:,15+N);
+time_min=t/60; depth=linspace(0,P.thick_half,N);
+
+%% -------------- Optional “split” marker --------------
+idx = find(phi>=0.5,1,'first');
+if isempty(idx), split_min = [];
+else,            split_min = time_min(idx);
+end
+
+%% -------------- Product temps (legend built from handles) --------------
+figure; 
+hCore = plot(time_min,T_core,'r','LineWidth',2); hold on;
+hSurf = plot(time_min,T_surf,'Color',[0.95 0.45 0.10],'LineWidth',1.5);
+hTgt  = yline(P.Tset_core,'--k','Target');
+
+legH = [hCore hSurf hTgt];
+legS = {'Core','Surface','Target'};
+
+if ~isempty(split_min)
+    hSplit = xline(split_min,':','Phase ~A→B');
+    legH(end+1) = hSplit;
+    legS{end+1} = 'Phase split';
+end
+
+grid on; xlabel('Time (min)'); ylabel('Temp (°C)'); 
+title('Product Temperatures');
+legend(legH, legS, 'Location','best');
+
+%% -------------- Air control --------------
+figure; plot(time_min,T_air,'b','LineWidth',1.5); hold on;
+plot(time_min,Tair_sp,'k--','LineWidth',1.1);
+yline(P.Tair_cap,':r','Cap');
+if ~isempty(split_min), xline(split_min,':','Phase ~A→B'); end
+grid on; xlabel('Time (min)'); ylabel('Air Temp (°C)'); title('Air Temperature Control');
+legend('T_{air}','T_{air,set}','Cap','Location','southeast');
+
+%% -------------- Heater & fan (with legend) --------------
+figure;
+yyaxis left;  hQ = plot(time_min,Q,'m','LineWidth',1.5);   ylabel('Heater Q (W)'); grid on;
+yyaxis right; hF = plot(time_min,fan_cmd,'--','LineWidth',1.3);  ylabel('Fan duty [0..1]'); xlabel('Time (min)');
+if ~isempty(split_min), xline(split_min,':','Phase ~A→B'); end
+title('Heater & Fan'); legend([hQ hF],{'Heater Q','Fan duty'},'Location','best');
+
+%% -------------- Flows & Δp (using your post helper) --------------
+u_in1 = X(:,7+N); u_in2 = X(:,8+N); u_out1 = X(:,9+N); u_out2 = X(:,10+N);
+dP_noise_std = 2; % Pa for display only
+[mdot_in1,mdot_in2,mdot_out1,mdot_out2,mdot_tot,dP_plot,~] = ...
+    postFlows_plot(dP_meas,u_in1,u_in2,u_out1,u_out2, ...
+                   P.rho_air, ...
+                   P.CdA_in1_min,P.CdA_in1_max,P.CdA_in2_min,P.CdA_in2_max, ...
+                   P.CdA_out1_min,P.CdA_out1_max,P.CdA_out2_min,P.CdA_out2_max, ...
+                   dP_noise_std,fan_cmd,P.fan_W_max);
+
+% smooth for display
+alpha = 0.08;
+mdot_in1  = filt(mdot_in1,alpha);  mdot_in2  = filt(mdot_in2,alpha);
+mdot_out1 = filt(mdot_out1,alpha); mdot_out2 = filt(mdot_out2,alpha);
+mdot_tot  = filt(mdot_tot,alpha);  dP_plot   = filt(dP_plot,alpha);
+
+% to g/s
+to_gps = 1e3;
+mi1 = mdot_in1*to_gps;  mi2 = mdot_in2*to_gps;
+mo1 = mdot_out1*to_gps; mo2 = mdot_out2*to_gps;
+mtot = mdot_tot*to_gps;
+
+% plot flows
+figure('Name','Flows & Pressure','Color','w');
+tlo = tiledlayout(3,1,'TileSpacing','compact','Padding','compact'); %#ok<NASGU>
+nexttile; plot(time_min,mi1,'LineWidth',1.4); hold on; plot(time_min,mi2,'LineWidth',1.4);
+if ~isempty(split_min), xline(split_min,':','Phase ~A→B'); end
+grid on; xlabel('Time (min)'); ylabel('Flow [g/s]');
+legend('Inlet 1','Inlet 2','Location','best'); title('Inlet Flows (smoothed)');
+
+nexttile; plot(time_min,mo1,'LineWidth',1.4); hold on; plot(time_min,mo2,'LineWidth',1.4);
+if ~isempty(split_min), xline(split_min,':','Phase ~A→B'); end
+grid on; xlabel('Time (min)'); ylabel('Flow [g/s]');
+legend('Outlet 1','Outlet 2','Location','best'); title('Outlet Flows (smoothed)');
+
+nexttile; yyaxis left;  plot(time_min,mtot,'LineWidth',1.6); ylabel('Total Purge [g/s]');
+yyaxis right; plot(time_min,dP_plot,':','LineWidth',1.4); ylabel('\Delta p [Pa]');
+if ~isempty(split_min), xline(split_min,':','Phase ~A→B'); end
+grid on; xlabel('Time (min)');
+legend('\Sigma In (= \Sigma Out)','\Delta p (smoothed)','Location','best');
+title('Total Flow & Pressure');
+
+%% -------------- Heatmap --------------
+figure; imagesc(time_min,depth*1000,Tb'); set(gca,'YDir','normal'); colormap hot; colorbar;
+xlabel('Time (min)'); ylabel('Depth from surface (mm)');
+title('Temperature Through Half-Thickness (°C)'); hold on;
+if ~isempty(split_min), xline(split_min,':w'); end
+
+%% -------------- Power balance (diagnostic) --------------
+% Rebuild air-side balance terms for intuition:
+TsK = T_surf+273.15;  Tw = X(:,2+N); TwK = Tw+273.15;
+q_rad = P.eps_batt*P.sigma*P.A_rad.*(TsK.^4 - TwK.^4);        % W (surf→wall)
+
+% crude air->wall coefficient as in model (depends on purge)
+root = sqrt(max(2*dP_plot/P.rho_air,0));
+CdAtot_now = ( ...
+    (P.CdA_in1_min + (P.CdA_in1_max-P.CdA_in1_min).*u_in1) + ...
+    (P.CdA_in2_min + (P.CdA_in2_max-P.CdA_in2_min).*u_in2) + ...
+    (P.CdA_out1_min + (P.CdA_out1_max-P.CdA_out1_min).*u_out1) + ...
+    (P.CdA_out2_min + (P.CdA_out2_max-P.CdA_out2_min).*u_out2) )/2;
+mdot_now = P.rho_air .* CdAtot_now .* root;                % kg/s
+h_aw = P.h_airwall0 + 25*(mdot_now.^0.5);                  % W/m2K
+Q_wall = h_aw.*P.A_wall.*(T_air - Tw);                     % W air→wall
+Q_purge = mdot_now*P.cp_air.*(T_air - P.Tamb);             % W out purge
+h_batt = P.h_base + P.h_fan_gain*fan_cmd;                  % W/m2K
+Q_prod  = h_batt.*P.A_batt.*(T_air - T_surf);              % W air→product
+
+figure('Name','Power Balance'); hold on; grid on;
+plot(time_min,Q,'k','LineWidth',1.5);
+plot(time_min,Q_purge,'b','LineWidth',1.3);
+plot(time_min,Q_wall,'c--','LineWidth',1.2);
+plot(time_min,Q_prod,'m','LineWidth',1.3);
+plot(time_min,q_rad,'g:','LineWidth',1.2);
+legend('Heater Q','Q purge','Q air\rightarrowwall','Q air\rightarrowproduct','Q rad (surf\rightarrowwall)','Location','best');
+xlabel('Time (min)'); ylabel('Power (W)');
+title('Heater vs. Sinks (purge, wall, product, radiation)');
+
+%% -------------- Valve mechanical angles (display only) --------------
+valveAngleFig(time_min,u_in1,u_in2,u_out1,u_out2,VALVE.geom);
+
+%% -------------- OPTIONAL: Calibration helpers (safe, offline) ------
+if CALIB.ENABLE
+    if CALIB.verbose, fprintf('\n=== Calibration helpers (analysis only) ===\n'); end
+
+    % ---- 1) CdA vs command (from run) & suggestions ----
+    calC = calibrate_CdA_from_run(time_min,dP_plot,u_in1,u_in2,u_out1,u_out2, ...
+                                  mdot_in1,mdot_in2,mdot_out1,mdot_out2,P,VALVE.geom);
+    if CALIB.verbose
+        fprintf('Suggested CdA maxima [m^2]: In1 %.3g  In2 %.3g  Out1 %.3g  Out2 %.3g\n', ...
+            calC.CdA_in1_max_sugg, calC.CdA_in2_max_sugg, calC.CdA_out1_max_sugg, calC.CdA_out2_max_sugg);
+        fprintf('Suggested CdA minima [m^2]: In1 %.3g  In2 %.3g  Out1 %.3g  Out2 %.3g\n', ...
+            calC.CdA_in1_min_sugg, calC.CdA_in2_min_sugg, calC.CdA_out1_min_sugg, calC.CdA_out2_min_sugg);
+    end
+    if CALIB.APPLY
+        P.CdA_in1_max = calC.CdA_in1_max_sugg;  P.CdA_in1_min = calC.CdA_in1_min_sugg;
+        P.CdA_in2_max = calC.CdA_in2_max_sugg;  P.CdA_in2_min = calC.CdA_in2_min_sugg;
+        P.CdA_out1_max= calC.CdA_out1_max_sugg; P.CdA_out1_min= calC.CdA_out1_min_sugg;
+        P.CdA_out2_max= calC.CdA_out2_max_sugg; P.CdA_out2_min= calC.CdA_out2_min_sugg;
+        warning('Applied suggested CdA values to P (CALIB.APPLY=true). Rerun sim if desired.');
+    end
+
+    % ---- 2) Δp_max suggestion to reach a chosen hold flow ----
+    CdAtot_hold = median(CdAtot_now(round(0.7*end):end));  % near hold
+    mdot_target = CALIB.target_hold_total_gps/1e3;         % kg/s
+    dp_needed = (mdot_target/(P.rho_air*max(CdAtot_hold,1e-8)))^2 * (P.rho_air/2);
+    dP_suggest = 1.2*dp_needed;                            % 20% margin
+    if CALIB.verbose
+        fprintf('Suggested dP_max ≈ %.1f Pa for target %.2f g/s (current CdA_tot≈%.3g m^2)\n', ...
+            dP_suggest, CALIB.target_hold_total_gps, CdAtot_hold);
+    end
+    if CALIB.APPLY, P.dP_max = dP_suggest; end
+
+    % ---- 3) Fit h = h0 + k*fan from energy balance ----
+    calH = calibrate_h_from_run(t,T_air,T_surf,Tw,mdot_now,Q,h_aw,P);
+    if CALIB.verbose
+        fprintf('Fit h_base ≈ %.1f W/m^2K, h_fan_gain ≈ %.1f W/m^2K per unit duty (current: %.1f, %.1f)\n', ...
+            calH.h0, calH.k, P.h_base, P.h_fan_gain);
+    end
+    if CALIB.APPLY
+        P.h_base = calH.h0; P.h_fan_gain = calH.k;
+        warning('Applied suggested h parameters to P (CALIB.APPLY=true). Rerun sim if desired.');
+    end
+end
+
+end % ===== main =====
+
+
+%% ================= ODE (continuous blend + hold clamps) =================
+function dxdt = ode_oven(t,x,P)
+N=P.N; i_Ta=1; i_Tb=2:(1+N); i_Tw=2+N;
+i_Ia=3+N; i_Tsp=4+N; i_Ic=5+N; i_Idp=6+N;
+i_u1=7+N; i_u2=8+N; i_u3=9+N; i_u4=10+N;
+i_Q=11+N; i_f=12+N; i_eD=13+N; i_dP=14+N; i_phi=15+N;
+
+T_air=x(i_Ta); Tb=x(i_Tb); T_wall=x(i_Tw);
+I_air=x(i_Ia); Tair_sp=x(i_Tsp); I_core=x(i_Ic); I_dp=x(i_Idp);
+u_in1=x(i_u1); u_in2=x(i_u2); u_out1=x(i_u3); u_out2=x(i_u4);
+Q=x(i_Q); fan_cmd=x(i_f); eD_air=x(i_eD); dP_meas=x(i_dP); phi=x(i_phi);
+
+sat=@(z)min(max(z,0),1); sat01=@(z)min(max(z,0),1);
+clamp=@(z,lo,hi)min(max(z,lo),hi);
+
+T_core=Tb(end); T_surf=Tb(1);
+
+% ---- Soft-start ramp (0..1) over soft_start_s seconds ----
+ramp = min(max(t / max(P.soft_start_s,1e-9), 0), 1);
+Qmax_eff        = (P.Qmax_soft_frac + (1 - P.Qmax_soft_frac)*ramp) * P.Qmax;
+airsp_rate_eff  = P.airsp_soft + (P.airsp_rate    - P.airsp_soft   ) * ramp;
+dTair_cap_eff   = P.dTair_degps_soft + (P.dTair_degps - P.dTair_degps_soft) * ramp;
+
+% ---- Smooth phase-blend target and dynamics ----
+e_phase = (T_core - (P.Tset_core - P.reach_margin)) / max(P.phase_width_C,1e-6);
+phi_tgt = 0.5*(1 + tanh(e_phase));            % 0..1, smooth around target
+dphi    = (phi_tgt - phi)/max(P.tau_phase,1e-6);
+
+% ---- Outer loop (core -> air setpoint) with back-calc AW
+e_core=P.Tset_core - T_core;
+I_core_dot=0;
+if abs(e_core)>P.deadband_core && T_air<(P.Tair_cap-P.cap_freeze_band), I_core_dot=e_core; end
+air_cmd_raw=P.Kp_core*e_core + P.Ki_core*I_core;
+air_cmd_limited=clamp(air_cmd_raw,-airsp_rate_eff,+airsp_rate_eff);
+Tair_sp_cmd_raw=Tair_sp + air_cmd_limited;
+Tair_sp_cmd_sat=min(max(40,Tair_sp_cmd_raw),P.Tair_cap);
+
+% Hold behavior: keep setpoint near cap, slow rate, freeze integral
+if phi > 0.6
+    low_sp = P.Tair_cap - P.B_min_air_sp;
+    if Tair_sp_cmd_sat < low_sp, Tair_sp_cmd_sat = low_sp; end
+    airsp_rate_eff = min(airsp_rate_eff, P.B_outer_rate);
+    if abs(e_core) <= P.B_core_deadband, I_core_dot = 0; end
+end
+
+I_core_dot=I_core_dot + P.Kaw_core*(Tair_sp_cmd_sat - Tair_sp_cmd_raw);
+if T_air >= (P.Tair_cap-0.2), Tair_sp_cmd_sat=min(Tair_sp_cmd_sat,Tair_sp); end
+dTair_sp=(Tair_sp_cmd_sat - Tair_sp)/max(P.tau_Tsp,1e-6);
+
+% ---- Purge supervisor (blended A→B)
+w_hotair = sat01((T_air - (P.Tair_cap - P.air_cap_margin)) / P.air_cap_margin);
+
+mdot_min   = (1-phi)*P.A_mdot_min   + phi*P.B_mdot_min;
+mdot_track = (1-phi)*P.A_mdot_heat  + phi*P.B_mdot_track;
+
+% Allow tracking progressively only in B
+util = Q/max(Qmax_eff,1e-9);
+util_allow   = sat01((P.util_off - util)/(P.util_off - P.util_on + 1e-9));
+margin_allow = sat01(((P.Tair_cap - T_air) - P.cap_margin_ok)/2.0);
+core_allow   = sat01((P.core_band - abs(e_core))/P.core_band);
+w_allow = phi * min([util_allow, margin_allow, core_allow]);   % 0 in A → 1 in B when ok
+
+mdot_cmd = mdot_min + (mdot_track - mdot_min)*w_allow;
+mdot_sp  = max(mdot_min, (1-w_hotair)*mdot_cmd + w_hotair*P.mdot_max);
+
+% ---- CdA and Δp PI (sign: higher dP => close valves)
+CdA_in1=P.CdA_in1_min + u_in1*(P.CdA_in1_max-P.CdA_in1_min);
+CdA_in2=P.CdA_in2_min + u_in2*(P.CdA_in2_max-P.CdA_in2_min);
+CdA_out1=P.CdA_out1_min+ u_out1*(P.CdA_out1_max-P.CdA_out1_min);
+CdA_out2=P.CdA_out2_min+ u_out2*(P.CdA_out2_max-P.CdA_out2_min);
+CdA_tot=max((CdA_in1+CdA_in2+CdA_out1+CdA_out2)/2,1e-8);
+
+dP_sp=((mdot_sp/(P.rho_air*CdA_tot))^2) * (P.rho_air/2);
+dP_sp=max(0,min(dP_sp,P.dP_max));
+ddP=(dP_sp - dP_meas)/max(P.tau_dp,1e-6);
+
+% Blended biases (no steps)
+bias_in_A  = 0.25 + 0.25;  bias_out_A = 0.25 + 0.10;
+bias_in_B  = 0.25 + 0.10;  bias_out_B = 0.25 + 0.25;
+bias_in  = (1-phi)*bias_in_A  + phi*bias_in_B;
+bias_out = (1-phi)*bias_out_A + phi*bias_out_B;
+
+e_dp=dP_sp - dP_meas; dI_dp=P.Ki_dp*e_dp;
+u_step=-(P.Kp_dp*e_dp + I_dp);        % closing when dP high
+u_mean=mean([u_in1,u_in2,u_out1,u_out2]);
+u_in1_cmd = sat(u_mean + u_step + (bias_in  - 0.5));
+u_in2_cmd = sat(u_mean + u_step + (bias_in  - 0.5));
+u_out1_cmd= sat(u_mean + u_step + (bias_out - 0.5));
+u_out2_cmd= sat(u_mean + u_step + (bias_out - 0.5));
+
+if T_air >= P.Tair_soft
+    bump = P.softcap_bump*(0.5+0.5*phi); % small & blended
+    u_out1_cmd = sat(u_out1_cmd + bump);
+    u_out2_cmd = sat(u_out2_cmd + bump);
+end
+
+du_in1 = clamp((u_in1_cmd - u_in1)/P.tau_flow,-P.u_slew,+P.u_slew);
+du_in2 = clamp((u_in2_cmd - u_in2)/P.tau_flow,-P.u_slew,+P.u_slew);
+du_out1= clamp((u_out1_cmd - u_out1)/P.tau_flow,-P.u_slew,+P.u_slew);
+du_out2= clamp((u_out2_cmd - u_out2)/P.tau_flow,-P.u_slew,+P.u_slew);
+
+% ---- Flows and purge
+root=sqrt(max(2*dP_meas/P.rho_air,0));
+mdot_in1  = P.rho_air*CdA_in1*root;
+mdot_in2  = P.rho_air*CdA_in2*root;
+mdot_out1 = P.rho_air*CdA_out1*root;
+mdot_out2 = P.rho_air*CdA_out2*root;
+s_in=mdot_in1+mdot_in2; s_out=mdot_out1+mdot_out2;
+if s_out>0, sc=s_in/s_out; mdot_out1=mdot_out1*sc; mdot_out2=mdot_out2*sc;
+else, mdot_out1=0.5*s_in; mdot_out2=0.5*s_in; end
+mdot_purge=max(0,min(s_in,P.mdot_max));
+if T_air < (P.Tamb-0.5), mdot_purge=max(mdot_purge,mdot_min); end
+
+% ---- Fan / h
+fan_target = sat(P.fan_min + (1-P.fan_min)*sat01(abs(e_core)/6));
+dfan = (fan_target - fan_cmd)/P.fan_tau;
+h_batt = P.h_base + P.h_fan_gain*fan_cmd;
+
+% ---- Energy balances (with wall losses) ----
+TsK=max(T_surf + 273.15,1.0); TwK=max(T_wall + 273.15,1.0);
+q_rad=P.eps_batt*P.sigma*P.A_rad*(TsK^4 - TwK^4);  % surface -> wall radiation
+h_aw = P.h_airwall0 + 25*(mdot_purge^0.5);        % air->wall convection scales with purge
+
+% Air node includes extra heat capacity for realistic inertia
+denom = P.m_air*P.cp_air + max(P.C_air_extra,0);
+Q_eff=clamp(Q,P.Qmin,Qmax_eff);
+dTair=( Q_eff ...
+      - h_batt*P.A_batt*(T_air - T_surf) ...
+      - mdot_purge*P.cp_air*(T_air - P.Tamb) ...
+      - h_aw*P.A_wall*(T_air - T_wall) ) / denom;
+dTair=clamp(dTair,-dTair_cap_eff,+dTair_cap_eff);
+
+% Slab conduction (half-thickness)
+alpha=P.k_batt/(P.rho_batt*P.cp_batt*P.dx^2);
+conv_coeff=h_batt/(P.rho_batt*P.cp_batt*P.dx);
+rad_coeff=(q_rad/P.A_batt)/(P.rho_batt*P.cp_batt*P.dx);
+
+dTb=zeros(N,1);
+if N>=2
+    dTb(1)=alpha*(Tb(2)-Tb(1)) + conv_coeff*(T_air - Tb(1)) - rad_coeff;
+    for i=2:N-1, dTb(i)=alpha*(Tb(i+1)-2*Tb(i)+Tb(i-1)); end
+    dTb(N)=alpha*(Tb(N-1)-Tb(N));  % adiabatic mid-plane
+else
+    dTb(1)=conv_coeff*(T_air - Tb(1)) - rad_coeff;
+end
+
+% Wall lumped node (with U_loss to ambient)
+dTwall=( q_rad + h_aw*P.A_wall*(T_air - T_wall) - P.U_loss*(T_wall - P.Tamb) )/(P.m_wall*P.cp_wall);
+
+% ---- Inner PID (air) with filtered D & anti-windup (stronger D blend)
+e_air = Tair_sp - T_air;
+deD_air=(e_air - eD_air)/max(P.tauD_air,1e-6);
+Kd_eff = P.Kd_air*(1 - 0.8*phi);     % much smaller D when phi≈1
+D_term = clamp(Kd_eff*deD_air,-P.Dterm_W_cap,+P.Dterm_W_cap);
+Q_unsat = P.Kp_air*e_air + P.Ki_air*I_air + D_term;
+Q_cmd   = clamp(Q_unsat,P.Qmin,Qmax_eff);
+if T_air < P.Tamb, Q_cmd=max(Q_cmd,0.2*Qmax_eff); end
+dI_air = e_air + P.Kaw_air*(Q_cmd - Q_unsat);
+dQ_des = (Q_cmd - Q)/max(P.tau_Q,1e-6);
+dQ     = clamp(dQ_des,-P.Q_slew,+P.Q_slew);
+
+dxdt=[ dTair; dTb; dTwall; dI_air; dTair_sp; I_core_dot; dI_dp; ...
+       du_in1; du_in2; du_out1; du_out2; dQ; dfan; deD_air; ddP; dphi ];
+end
+
+%% ================= Plot helpers (flows/Δp) =====================
+function [mdot_in1,mdot_in2,mdot_out1,mdot_out2,mdot_tot,dP_meas_out,fan_W] = postFlows_plot( ...
+        dP_meas,u_in1,u_in2,u_out1,u_out2, ...
+        rho_air, ...
+        CdA_in1_min,CdA_in1_max,CdA_in2_min,CdA_in2_max, ...
+        CdA_out1_min,CdA_out1_max,CdA_out2_min,CdA_out2_max, ...
+        dP_noise_std,fan_cmd,fan_W_max)
+
+n = numel(dP_meas);
+mdot_in1  = zeros(n,1); mdot_in2  = zeros(n,1);
+mdot_out1 = zeros(n,1); mdot_out2 = zeros(n,1);
+mdot_tot  = zeros(n,1); dP_meas_out = zeros(n,1);
+fan_W     = zeros(n,1);
+
+for k = 1:n
+    Ci1 = CdA_in1_min  + u_in1(k)  *(CdA_in1_max  - CdA_in1_min);
+    Ci2 = CdA_in2_min  + u_in2(k)  *(CdA_in2_max  - CdA_in2_min);
+    Co1 = CdA_out1_min + u_out1(k) *(CdA_out1_max - CdA_out1_min);
+    Co2 = CdA_out2_min + u_out2(k) *(CdA_out2_max - CdA_out2_min);
+
+    dP = max(0, dP_meas(k) + dP_noise_std*randn);
+    dP_meas_out(k) = dP;
+
+    root = sqrt(max(2*dP/rho_air,0));
+    mdot_in1(k)  = rho_air * Ci1 * root;
+    mdot_in2(k)  = rho_air * Ci2 * root;
+    mdot_out1(k) = rho_air * Co1 * root;
+    mdot_out2(k) = rho_air * Co2 * root;
+
+    s_in  = mdot_in1(k)+mdot_in2(k);
+    s_out = mdot_out1(k)+mdot_out2(k);
+    if s_out>0
+        sc = s_in/s_out; mdot_out1(k)=mdot_out1(k)*sc; mdot_out2(k)=mdot_out2(k)*sc;
+    else
+        mdot_out1(k)=0.5*s_in; mdot_out2(k)=0.5*s_in;
+    end
+    mdot_tot(k) = s_in;
+
+    fan_W(k) = fan_W_max * min(max(fan_cmd(k),0),1);
+end
+end
+
+function y = filt(x, a)
+    y = x;
+    for k = 2:numel(x)
+        y(k) = (1-a)*y(k-1) + a*x(k);
+    end
+end
+
+%% ===================== Display: valve angles =====================
+function valveAngleFig(time_min,u1,u2,u3,u4,geom)
+D = geom.D_mm/1000;     % m
+A_port = pi*(D/2)^2;    % m^2 (for info only)
+
+% Map command to angle using area fraction f ≈ 1 - cos(theta)
+f1=u1; f2=u2; f3=u3; f4=u4;   % display mapping (u ~ area fraction)
+theta1 = acos(max(0,1-f1))*180/pi;
+theta2 = acos(max(0,1-f2))*180/pi;
+theta3 = acos(max(0,1-f3))*180/pi;
+theta4 = acos(max(0,1-f4))*180/pi;
+
+figure('Name','Valve Openings (mechanical angle)');
+tiledlayout(4,1,'TileSpacing','compact','Padding','compact');
+nexttile; plot(time_min,theta1); grid on; ylabel('Inlet 1 [deg]'); title('Valve Openings (0° closed  \rightarrow 90° fully open)');
+nexttile; plot(time_min,theta2); grid on; ylabel('Inlet 2 [deg]');
+nexttile; plot(time_min,theta3); grid on; ylabel('Outlet 1 [deg]');
+nexttile; plot(time_min,theta4); grid on; ylabel('Outlet 2 [deg]'); xlabel('Time (min)');
+end
+
+%% ===================== Calibration: CdA from run =====================
+function cal = calibrate_CdA_from_run(tmin,dp,u1,u2,u3,u4,mi1,mi2,mo1,mo2,P,geom)
+rho = P.rho_air;   small = 1e-9;
+
+% Effective CdA estimates from m_dot and Δp:  mdot = rho*CdA*sqrt(2Δp/rho)
+root = sqrt(max(2*dp/rho,0));
+CdA1_est = (mi1/1e3) ./ max(rho*root,small);
+CdA2_est = (mi2/1e3) ./ max(rho*root,small);
+CdA3_est = (mo1/1e3) ./ max(rho*root,small);
+CdA4_est = (mo2/1e3) ./ max(rho*root,small);
+
+% Plot CdA vs command to see linearity
+figure('Name','Calibration: CdA vs command'); tiledlayout(2,2,'TileSpacing','compact','Padding','compact');
+nexttile; scatter(u1,CdA1_est,6,'filled'); hold on; plot([0 1],[P.CdA_in1_min P.CdA_in1_max],'k'); grid on; ylim([0 max(CdA1_est)*1.1+1e-6]); title('Inlet 1'); xlabel('u'); ylabel('CdA [m^2]');
+nexttile; scatter(u2,CdA2_est,6,'filled'); hold on; plot([0 1],[P.CdA_in2_min P.CdA_in2_max],'k'); grid on; ylim([0 max(CdA2_est)*1.1+1e-6]); title('Inlet 2');
+nexttile; scatter(u3,CdA3_est,6,'filled'); hold on; plot([0 1],[P.CdA_out1_min P.CdA_out1_max],'k'); grid on; ylim([0 max(CdA3_est)*1.1+1e-6]); title('Outlet 1');
+nexttile; scatter(u4,CdA4_est,6,'filled'); hold on; plot([0 1],[P.CdA_out2_min P.CdA_out2_max],'k'); grid on; ylim([0 max(CdA4_est)*1.1+1e-6]); title('Outlet 2');
+
+% Robust suggestions = 5th and 95th percentiles in top/bottom command bands
+band = u1>0.8; cal.CdA_in1_max_sugg = max(quantile(CdA1_est(band & isfinite(CdA1_est)),0.90), P.CdA_in1_min*1.2);
+band = u2>0.8; cal.CdA_in2_max_sugg = max(quantile(CdA2_est(band & isfinite(CdA2_est)),0.90), P.CdA_in2_min*1.2);
+band = u3>0.8; cal.CdA_out1_max_sugg= max(quantile(CdA3_est(band & isfinite(CdA3_est)),0.90), P.CdA_out1_min*1.2);
+band = u4>0.8; cal.CdA_out2_max_sugg= max(quantile(CdA4_est(band & isfinite(CdA4_est)),0.90), P.CdA_out2_min*1.2);
+
+band = u1<0.1; cal.CdA_in1_min_sugg = min(quantile(CdA1_est(band & isfinite(CdA1_est)),0.10), P.CdA_in1_max/5);
+band = u2<0.1; cal.CdA_in2_min_sugg = min(quantile(CdA2_est(band & isfinite(CdA2_est)),0.10), P.CdA_in2_max/5);
+band = u3<0.1; cal.CdA_out1_min_sugg= min(quantile(CdA3_est(band & isfinite(CdA3_est)),0.10), P.CdA_out1_max/5);
+band = u4<0.1; cal.CdA_out2_min_sugg= min(quantile(CdA4_est(band & isfinite(CdA4_est)),0.10), P.CdA_out2_max/5);
+
+% Valve geometry FYI (not used in fit)
+cal.port_area_m2 = pi*(geom.D_mm/2000)^2;
+end
+
+%% ===================== Calibration: h = h0 + k*fan =====================
+function cal = calibrate_h_from_run(t,Tair,Ts,Tw,mdot,Q,h_aw,P)
+% Energy balance rearranged for h_batt (noisy → robust fit later):
+% (m_air cp + C_air_extra)*dTair/dt = Q - mdot cp (Tair - Tamb) - h_aw A_wall (Tair - Tw) - h_batt A_batt (Tair - Ts)
+% => h_batt = [Q - mdot*cp*(Tair-Tamb) - h_aw*A_wall*(Tair-Tw) - C_air*dTair/dt] / [A_batt*(Tair - Ts)]
+C_air = P.m_air*P.cp_air + max(P.C_air_extra,0);
+dt = diff(t); dt = [dt(1); dt];       % simple forward diff
+dTair = [diff(Tair)./diff(t); 0]; dTair(end) = dTair(end-1);
+num = Q - mdot*P.cp_air.*(Tair - P.Tamb) - h_aw*P.A_wall.*(Tair - Tw) - C_air.*dTair;
+den = P.A_batt * max(abs(Tair - Ts), 1e-3);
+h_est = num ./ den;                    % W/m^2K estimate
+
+% Robust linear fit: h_est ≈ h0 + k*fan
+X = [ones(size(Tair))  P.h_fan_gain*0 + ( (h_est*0) + (0:0) )]; %#ok<NASGU> 
+F = evalin('caller','fan_cmd'); 
+A = [ones(numel(F),1) F(:)];
+w = double(isfinite(h_est) & h_est>0 & h_est<500);  % filter outliers
+w = w .* (abs(Tair-Ts) > 0.5);                     % avoid near-zero denom periods
+A = A(w>0,:); y = h_est(w>0);
+if size(A,1) >= 10
+    theta = A\y;
+    cal.h0 = max(theta(1), 2);     % h_base
+    cal.k  = max(theta(2), 0.1);   % gain per unit duty
+else
+    cal.h0 = P.h_base; cal.k = P.h_fan_gain;
+end
+
+% Plot
+figure('Name','Calibration: h vs fan'); scatter(F(h_est>0), h_est(h_est>0), 6,'filled'); hold on; grid on;
+fgrid = linspace(0,1,50); plot(fgrid, cal.h0 + cal.k*fgrid,'k','LineWidth',1.5);
+xlabel('Fan duty'); ylabel('h_{batt} [W/m^2K]'); title('h fit from energy balance');
+end
