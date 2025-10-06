@@ -1,9 +1,11 @@
 # Cascade Temperature Control with Smart Air Flow  
 
+## NOT THE FINAL VERSION
+
 ## IMT Nord Europe — DNM–DMI 2025–2026
 
 A compact **thermal control project** combining simulation, control design, and embedded implementation.  
-The goal: heat and dry a coated metal plate in a small **8 L hotbox** while keeping air ≤ 70 °C (but higher than 60 °C)for safety.
+The goal: heat and dry a coated metal plate in a small **8 L hotbox** while keeping air ≤ 70 °C (but higher than 60 °C) for safety.
 
 ---
 
@@ -46,4 +48,4 @@ The goal: heat and dry a coated metal plate in a small **8 L hotbox** while keep
 1. Flash **MicroPython** on the Pico W  
 2. Upload `pico_thermostat_servo.py`  
 3. Power the servo (5 V + GND) and run the script  
-4. Monitor live telemetry like:
+4. Monitor live telemetry
