@@ -1,244 +1,681 @@
-% ---------- Research Paper Codes in Overleaf Latex----------
-
 \documentclass[11pt,a4paper]{article}
 
-% ---------- Packages ----------
+% ---------- Fonts & language (pdfLaTeX) ----------
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{lmodern}
+\usepackage{textcomp}
+\usepackage[english]{babel}
+\usepackage{microtype}
+
+% ---------- Page layout ----------
 \usepackage[margin=1in]{geometry}
-\usepackage{amsmath, amssymb}
+
+% ---------- Math ----------
+\usepackage{amsmath,amssymb,mathtools}
+\DeclareMathOperator{\sat}{sat}
+\DeclareMathOperator{\clip}{clip}
+
+% Reminder equations (R1, R2, ...)
+\newcounter{reminder}
+\renewcommand{\thereminder}{R\arabic{reminder}}
+\newenvironment{reminder}
+  {\refstepcounter{reminder}\begin{equation}\tag{\thereminder}}
+  {\end{equation}}
+
+% --- Control-Design equation numbering: (C1), (C2), ... ---
+\newcounter{ceq}
+\renewcommand{\theceq}{C\arabic{ceq}}
+\newenvironment{controleq}
+  {\refstepcounter{ceq}\begin{equation}\tag{\theceq}}
+  {\end{equation}}
+
+% ---------- Units ----------
 \usepackage{siunitx}
-\sisetup{detect-all}
-\usepackage{graphicx}
-\usepackage{booktabs}
-\usepackage{caption}
-\usepackage{subcaption}
-\usepackage{hyperref}
-\usepackage{enumitem}
-\setlist{nosep}
-
-\hypersetup{
-  colorlinks=true,
-  linkcolor=black,
-  urlcolor=blue,
-  citecolor=black,
-  pdfauthor={Harish TANNIRA,Yin LI, Zhiyan PIAO, Yinpu CHEN, Erk CAYHAN},
-  pdftitle={Heating & Drying in an 8-L Insulated Box}
-}
-
 \sisetup{
   detect-all,
-  per-mode=symbol,
+  per-mode = symbol,
   separate-uncertainty = true
 }
 
+% ---------- Figures & tables ----------
+\usepackage{graphicx}
+\usepackage{subcaption}
+\usepackage{caption}
+\usepackage[section]{placeins} % keep floats within their section
+\usepackage{float}             % for [H]
+\usepackage{booktabs}
+
+% ---------- Lists ----------
+\usepackage{enumitem}
+\setlist{nosep}
+
+% ---------- Code-highlighting package ----------
+\usepackage{listings}
+\usepackage{xcolor}
+\renewcommand{\lstlistingname}{Listing}              % caption prefix
+\renewcommand{\lstlistlistingname}{List of Listings} % list title
+\lstdefinestyle{picode}{
+  language=Python,
+  basicstyle=\ttfamily\footnotesize,
+  numbers=left,
+  numberstyle=\tiny,
+  stepnumber=1,
+  numbersep=6pt,
+  frame=single,
+  framerule=0.4pt,
+  showstringspaces=false,
+  tabsize=2,
+  breaklines=true,
+  keywordstyle=\color{blue!70!black},
+  commentstyle=\color{green!50!black},
+  stringstyle=\color{magenta!50!black},
+  columns=fullflexible
+}
+
+% ---------- Hyperlinks (load late) ----------
+\usepackage[colorlinks,linkcolor=blue,citecolor=blue,urlcolor=blue]{hyperref}
+\usepackage[capitalise,nameinlink]{cleveref} % AFTER hyperref
+
+% ---------- Helpers for "back to text" ----------
+\newcommand{\markhere}[1]{\hypertarget{#1}{}} % anchor where figure is first discussed
+\DeclareRobustCommand{\backtotext}[1]{\texorpdfstring{\hyperlink{#1}{(back to text)}}{(back to text)}}
+
 % ---------- Title ----------
-\title{\textbf{Heating \& Drying in an 8-L Insulated Box}\\
-\large Cascade Temperature Control with Smart air flow }
-\author{Harish TANNIRA,Yin LI, Zhiyan PIAO, Yinpu CHEN, Erk CAYHAN\\ \small Course: \textit{Research Project/ MATLAB Simulation Part} }
-\date{\small 26/09/2025}
+\title{\textbf{Research Project for IMT Nord Europe DNM--DMI 2025--2026}\\
+\large Cascade Temperature Control with Smart Air Flow}
+\author{Harish TANNIRA, Yin LI, Zhiyan PIAO, Yinpu CHEN, Erk CAYHAN\\ \small Course: \textit{Research Project}}
+\date{\small 06/10/2025}
 
 \begin{document}
 \maketitle
 
+% --- Front matter numbering (roman numerals) ---
+\pagenumbering{roman}
+
+% --- Abstract ---
 \begin{abstract}
-This project studies how to heat and dry a coated metal strip inside a small \SI{8}{L} insulated box. The target is to reach a chosen product \textbf{core temperature} (e.g., \SI{65}{\celsius}) while keeping the \textbf{medium box air} at or below \SI{70}{\celsius} to protect the ink and the metal plate and to prevent fire hazard and box material polyurethane. A low-order thermal model is used: a well-mixed air node, a lumped wall node, and a \textbf{half-thickness} 1-D conduction model of the product to simply simulation. A \textbf{cascade controller} is designed: an outer loop sets the air temperature setpoint from the core error, and an inner PID loop drives the heater. A ``smart air flow '' supervisor controls inlet/outlet based on heating, tracking, or safety needs. 
-The final code avoids numerical crashes using rate limits, derivative filtering / capping, and cold-run guards. The results show stable heating, realistic air flow (g/s) and safe operation. The target set to be core at \SI{65}{\celsius} unfortunately due to heater power limitations and the heat loss target cannot be reached. From the simulation the last temperature reading for ink coating and metal plate is \SI{61}{\celsius}.
+This project investigates heating and drying a coated metal strip in a small \SI{8}{\liter} insulated enclosure. 
+The target is to reach a chosen product \textbf{core temperature} (e.g., \SI{65}{\celsius}) while keeping \textbf{box air} at or below \SI{70}{\celsius} 
+to protect the ink, the metal plate, and the polyurethane enclosure. 
+A low-order thermal model is employed, consisting of a well-mixed air node, a lumped wall node, and 1D conduction across half the product thickness. 
+A \textbf{cascade controller} is designed: the outer loop sets the air \emph{set-point} from the core error, and the inner PID loop drives the heater. 
+An intelligent airflow supervisor regulates the ports depending on heating, tracking, and safety conditions.
+The final simulation code incorporates protections against numerical instability by applying rate limits, derivative filtering/capping, and cold-run guards. 
+The results demonstrate stable heating, realistic airflow (\si{\gram\per\second}), and safe operation. 
+With the available heater capacity of \SI{60}{\watt}, the system cannot reach the target core temperature of \SI{65}{\celsius}; instead, it stabilizes approximately at \SI{61}{\celsius}.
 \end{abstract}
+
+\vspace{0.5em}
+\noindent\textbf{Keywords:} Thermal control, Cascade PID, Airflow regulation, Smart heating, Embedded system, Raspberry Pi Pico W, Heat transfer modeling.
+
+\addcontentsline{toc}{section}{Abstract}
+
+% --- Acknowledgments (optional) ---
+\section*{Acknowledgments}
+The authors thank the IMT Nord Europe faculty and peers for their valuable support throughout this project.
+\addcontentsline{toc}{section}{Acknowledgments}
+
+% ===============================
+% Put all lists on separate pages
+% ===============================
+\clearpage                  % (use \cleardoublepage if using twoside)
+
+% --- Table of Contents ---
+\setcounter{tocdepth}{2} % sections + subsections
+\tableofcontents
+\clearpage
+
+% --- Lists (optional) ---
+\listoffigures
+\addcontentsline{toc}{section}{List of Figures}
+\listoftables
+\addcontentsline{toc}{section}{List of Tables}
+\lstlistoflistings
+\addcontentsline{toc}{section}{\lstlistlistingname}
+\clearpage
+
+% --- Switch to Arabic numbering for main body ---
+\pagenumbering{arabic}
+
+% ===================== MAIN TEXT =====================
 
 \section{Objectives}
 \begin{enumerate}
-  \item Reach and hold a\textbf{stable product core temperature}.
-  \item Enforce an \textbf{air temperature cap} $\le \SI{70}{\celsius}$.
-  \item Air flow must be \textbf{realistic} and measurable range (g/s).
-  \item Clear plots required for: product temps, air vs.\ setpoint, heater/fan usage, per-port flows, total flow \& $\Delta p$, and a through-thickness heat map.
-  \item Controller used for simulation must be that ported to embedded hardware to switch prototype phase.
+  \item Reach and hold a \textbf{stable product core temperature}.
+  \item Instrate an \textbf{ air temperature cap} of \(\le \SI{70}{\celsius}\).
+  \item Keep airflow \textbf{realistic} and measurable (\si{\gram\per\second}).
+  \item Provide clear plots: product temperatures versus set-point, heater/fan usage, per-port flows, total flow, and a through-thickness heat map.
+  \item Port the simulation controller to embedded hardware for prototyping.
+  \item Design inlet/outlet hardware to regulate airflow and prevent overheating.
 \end{enumerate}
 
 \section{System Overview}
 \subsection{Geometry \& Materials}
 \begin{itemize}
-  \item Polyurethane box: about \SI{0.2}{m} $\times$ \SI{0.2}{m} $\times$ \SI{0.2}{m} (\(\approx \SI{8}{L}\)).
-  \item Product: metal plate with a thin paint layer, modeled as a slab across \textbf{half the thickness}.
-  \item Ports: two inlets + two outlets with controllable effective discharge area $C_dA$.
+  \item Polyurethane enclosure: about \SI{0.2}{\meter} $\times$ \SI{0.2}{\meter} $\times$ \SI{0.2}{\meter} (\(\approx \SI{8}{\liter}\)).
+  \item Product: metal plate with a thin paint layer, modeled as a half-thickness slab.
+  \item Ports: two inlets and two outlets with a controllable effective discharge area \(C\!dA\).
 \end{itemize}
 
 \subsection{Sensors \& Actuators}
 \begin{itemize}
-  \item Sensors: air temperature, product surface \& core (mid-plane), pressure differential (as a proxy).
-  \item Actuators: electric heater $Q$, fan (crearecirculation which raises $h$), and four valves (in1, in2, out1, out2).
+  \item Sensors: air temperature, product surface \& core (mid-plane), and pressure differential.
+  \item Actuators: electric heater \(Q\), fan (raises \(h\)), and four valves (in1, in2, out1, out2).
 \end{itemize}
+
+\section{Assumptions}
+\begin{itemize}
+  \item \textbf{Well-mixed air:} the air is spatially uniform in temperature, with added heat capacity \(C_{\mathrm{air,extra}}\) for inertia.
+  \item \textbf{Ideal gas:} constant \(\rho, c_p, k\) over \SI{25}{\celsius}--\SI{70}{\celsius}, adequate at near-atmospheric pressure.
+  \item \textbf{Lumped wall:} the polyurethane wall is a single thermal node that exchanges heat with air and ambient air.
+  \item \textbf{Half-slab conduction:} 1D conduction across half thickness with \(N\) layers and an adiabatic mid-plane.
+  \item \textbf{Radiation:} surface \(\to\) wall radiation with constant emissivity \(\varepsilon\).
+  \item \textbf{Flow balance:} \(\sum \dot m_{\mathrm{in}} = \sum \dot m_{\mathrm{out}}\).
+\end{itemize}
+
+\section{Nomenclature}
+\begin{table}[!ht]\centering
+\begin{tabular}{@{}lll@{}}
+\toprule
+Symbol & Meaning & Units \\
+\midrule
+\(T_{\mathrm{air}}\) & Air temperature & \si{\celsius} \\
+\(T_{\mathrm{surf}},T_{\mathrm{core}}\) & Product surface, core temperature & \si{\celsius} \\
+\(T_{\mathrm{wall}}\) & Wall temperature & \si{\celsius} \\
+\(T_{\mathrm{air,set}}\) & Air temperature set-point & \si{\celsius} \\
+\(Q\) & Heater power input & \si{\watt} \\
+\(h_{\mathrm{prod}}, h_{\mathrm{aw}}\) & Convective coefficients (air\(\leftrightarrow\)product, air\(\leftrightarrow\)wall) & \si{\watt\per\meter\squared\per\kelvin} \\
+\(\dot m\) & Mass flow rate of air & \si{\kilogram\per\second} \\
+\(A_{\mathrm{prod}},A_{\mathrm{wall}}\) & Heat transfer areas & \si{\meter\squared} \\
+\(m_{\mathrm{air}},m_{\mathrm{wall}}\) & Mass of air, wall & \si{\kilogram} \\
+\(c_p,c_{\mathrm{wall}}\) & Heat capacities (air, wall) & \si{\joule\per\kilogram\per\kelvin} \\
+\(U_{\mathrm{loss}}\) & Lumped leakage coefficient & \si{\watt\per\kelvin} \\
+\(q_{\mathrm{rad}}\) & Radiative heat transfer (surface→wall) & \si{\watt} \\
+\(\varepsilon\) & Emissivity of product surface & -- \\
+\(\sigma\) & Stefan--Boltzmann constant & \si{\watt\per\meter\squared\per\kelvin^4} \\
+\(\Delta p\) & Pressure differential & \si{\pascal} \\
+\(C\!dA\) & Effective discharge area & \si{\meter\squared} \\
+\bottomrule
+\end{tabular}
+\caption{Key symbols and definitions.}
+\end{table}
 
 \section{Thermal Model (low order)}
 \subsection{Nodes and balances}
+
 \textbf{Air (well-mixed):}
 \begin{equation}
-m_{\text{air}} c_p \frac{dT_{\text{air}}}{dt} =
-Q - h_{\text{prod}}A_{\text{prod}}(T_{\text{air}} - T_{\text{surf}})
-- \dot{m}\,c_p\,(T_{\text{air}}-T_{\text{amb}})
-- h_{\text{aw}}A_{\text{wall}}(T_{\text{air}}-T_{\text{wall}}).
-\label{eq:air}
+m_{\mathrm{air}} c_{p,\mathrm{air}} \frac{dT_{\mathrm{air}}}{dt} =
+Q - h_{\mathrm{prod}} A_{\mathrm{prod}} (T_{\mathrm{air}} - T_{\mathrm{surf}})
+- \dot{m}\, c_p (T_{\mathrm{air}} - T_{\mathrm{amb}})
+- h_{\mathrm{aw}} A_{\mathrm{wall}} (T_{\mathrm{air}} - T_{\mathrm{wall}}).
+\label{eq:air_balance}
 \end{equation}
 
 \textbf{Wall (lumped):}
 \begin{equation}
-m_{\text{wall}} c_{\text{wall}} \frac{dT_{\text{wall}}}{dt} =
-q_{\text{rad}} + h_{\text{aw}}A_{\text{wall}}(T_{\text{air}}-T_{\text{wall}})
-- U_{\text{loss}}(T_{\text{wall}}-T_{\text{amb}}).
+m_{\mathrm{wall}} c_{\mathrm{wall}} \frac{dT_{\mathrm{wall}}}{dt} =
+q_{\mathrm{rad}} + h_{\mathrm{aw}} A_{\mathrm{wall}} (T_{\mathrm{air}} - T_{\mathrm{wall}})
+- U_{\mathrm{loss}} (T_{\mathrm{wall}} - T_{\mathrm{amb}}).
+\label{eq:wall_balance}
 \end{equation}
 
-\textbf{Product (1-D, half thickness):} explicit finite difference with $N$ layers; adiabatic mid-plane. Surface flux includes convection and radiation:
+\textbf{Product (surface radiation):}
 \begin{equation}
-q_{\text{rad}}=\varepsilon \sigma A_{\text{prod}} \Big((T_{\text{surf}}+273.15)^4 - (T_{\text{wall}}+273.15)^4\Big).
+q_{\mathrm{rad}}=\varepsilon \sigma A_{\mathrm{prod}}
+\Big((T_{\mathrm{surf}}+273.15)^4 - (T_{\mathrm{wall}}+273.15)^4\Big).
+\label{eq:rad}
 \end{equation}
+
+\textbf{Fan--\(h\) link:}
+\begin{reminder}\label{eq:h_def}
+h = \frac{k}{L}\,\mathrm{Nu}(Re, Pr).
+\end{reminder}
 
 \subsection{Air Flow Model}
-Each port uses an effective discharge area $C_dA$. Total air flow  is driven by a target $\Delta p$; inlets and outlets move together but with a slight bias (more outlet opening due to exhaust gas) near the air cap for safety. Mass balance is enforced:
-\(\sum \dot{m}{\text{in}} = \sum \dot{m}{\text{out}}\).
+The ports are modeled with an effective discharge area \(C\!dA\). The total airflow is driven by a target \(\Delta p\), with an inlet/outlet bias near the air cap for safety. Mass balance is enforced:
+\begin{reminder}\label{eq:mass_balance}
+\sum \dot{m}_{\mathrm{in}} = \sum \dot{m}_{\mathrm{out}}.
+\end{reminder}
+Short-orifice relation:
+\begin{reminder}\label{eq:mass_flow_orifice}
+\dot{m} = \rho \, C\!dA \, \sqrt{\tfrac{2\,\Delta p}{\rho}}.
+\end{reminder}
 
-\section{Control Design}
-\subsection{Cascade structure}
-\textbf{Outer loop (core $\rightarrow$ air setpoint).} Proportional + small integral, anti-windup, and a \textbf{rate limit} on $T_{\text{air,set}}$. The integrator freezes near the cap to avoid fighting safety limits.
+\section{Control Design}\label{sec:control_design}
+\setcounter{ceq}{0}
 
-\textbf{Inner loop (air $\rightarrow$ heater).} PID with \textbf{filtered derivative} and a derivative cap. Heater command has a \textbf{slew-rate limit}.
+The control strategy for the oven system is based on a proportional--integral--derivative (PID) control structure arranged in a cascade configuration. 
+This approach is well-suited for thermal systems, which are typically slow and stable but require precise temperature regulation and protection against overshoot. 
+The cascade layout separates the fast air temperature dynamics from the slower heating of the metal plate, allowing each loop to focus on its own time scale.
 
-\subsection{Smart air flow  Supervisor}
-Smoothly blends three regimes using weights:
+\subsection{Principle of PID Control}
+PID control is widely used because it is simple, robust, and effective for many physical systems. 
+The idea is to continuously adjust the control input based on how far the measured variable is from its target. 
+Here, the controller compares the measured temperature with the set point and adjusts the heater or airflow accordingly.
+
+The controller output \(u(t)\) is defined as:
+\begin{controleq}\label{eq:pid_u}
+u(t) = K_P\,e(t) + K_I \!\int_0^t e(\tau)\,d\tau + K_D \frac{de(t)}{dt},
+\end{controleq}
+where the control error is
+\begin{controleq}\label{eq:error_def}
+e(t) = T_{\mathrm{set}} - T_{\mathrm{measured}}.
+\end{controleq}
+
+Each term in \cref{eq:pid_u} has a specific function:
 \begin{itemize}
-  \item \textbf{Heat-up:} higher air flow  to keep the box safe early.
-  \item \textbf{Track/Hold:} moderate air flow .
-  \item \textbf{Safety/Vent:} near the air cap, open outlets more and raise air flow .
-\end{itemize}
-A minimum air flow  is always kept; valve moves are rate-limited.
-
-\subsection{Stability / Safety Guards}
-\begin{itemize}
-  \item D-term filtering and \textbf{cap} (no giant negative spikes).
-  \item \textbf{Rate limit} on $dT_{\text{air}}/dt$ to prevent unrealistic jumps.
-  \item \textbf{Kelvin floor} in radiation to keep $(\cdot)^4$ well-behaved.
-  \item \textbf{Cold-runaway guards:} if $T_{\text{air}}<T_{\text{amb}}$, hold minimum air flow  and heater.
-  \item Setpoint clamped to \SI{40}{\celsius}--$T_{\text{cap}}$ and rate-limited with anti-windup.
+  \item \textbf{Proportional (P):} reacts to the current error. It provides a strong response when the temperature is far from the target, but may leave a small steady-state offset on its own.
+  \item \textbf{Integral (I):} accumulates past errors and removes the offset, ensuring that the system eventually reaches the exact set point.
+  \item \textbf{Derivative (D):} anticipates future error by responding to its rate of change, helping prevent overshoot when the temperature increases too quickly.
 \end{itemize}
 
-\section{Simulation Setup}
-\subsection{Key Parameters (example)}
-\begin{itemize}
-  \item Heater: $Q_{\max}=\SI{60}{W}$.
-  \item Cap: $T_{\text{air,cap}}=\SI{70}{\celsius}$; ambient $T_{\text{amb}}=\SI{25}{\celsius}$.
-  \item air flow  targets: heat-up $\sim \SI{1}{g/s}$, hold $\sim \SI{3}{g/s}$, safety up to $\sim \SI{8}{g/s}$ (the controller only uses what is needed).
-  \item Fan duty $0.4\rightarrow1.0$; increases $h$.
-  \item Product: $A=\SI{0.015}{m^2}$, total thickness \SI{10}{mm}, $N=3$ layers (half-thickness model).
-\end{itemize}
+For thermal systems like this oven, PID control provides a good balance between precision and stability. 
+To improve numerical behavior, derivative filtering and anti-windup protection are added to prevent sudden jumps or runaway integration when limits are reached.
 
-\subsection{Solver}
-MATLAB \texttt{ode15s}, \(\text{RelTol}=10^{-6}\), \(\text{AbsTol}=10^{-7}\), \(\text{MaxStep}=\SI{0.25}{s}\).
+\subsection{Cascaded Control Architecture}
+Because the oven has two main temperature domains, air and metal plate, a cascaded PID setup is used. 
+The inner loop controls the air temperature directly via the heater, whereas the outer loop adjusts the air setting point based on the slower response of the plate (the ``core'').
 
-\section{Tuning (practical)}
-\begin{enumerate}
-  \item Tune the \textbf{inner} heater loop first: increase $K_p$, add $K_i$ until air tracks well, then add small $K_d$ and adjust the derivative filter for smoothness (keep D-cap on).
-  \item Tune the \textbf{outer} loop next: modest $K_p$ + small $K_i$. Always keep a rate limit on $T_{\text{air,set}}$.
-  \item Choose air flow  levels that give flows in \textbf{g/s}, not kg/s. Check that total air flow  and $\Delta p$ look realistic.
-  \item If you see oscillation: reduce $K_d$, slow the setpoint rate, or adjust slew limits.
+\paragraph{Outer Loop (Core $\rightarrow$ Air Set-point).}
+The outer loop acts as a supervisory controller that measures the difference between the desired and actual core temperatures:
+\begin{controleq}\label{eq:core_error}
+e_{\mathrm{core}} = T_{\mathrm{set,core}} - T_{\mathrm{core}}.
+\end{controleq}
+This error is fed into a PI controller that calculates the set point of air temperature \(T_{\mathrm{air,set}}\). 
+Because the plate heats slowly, the integral term is kept small to avoid overshoot and maintain smooth behavior. 
+A rate limiter ensures that \(T_{\mathrm{air,set}}\) does not rise faster than the system can safely handle:
+\begin{controleq}\label{eq:air_rate_limit}
+\left|\frac{dT_{\mathrm{air,set}}}{dt}\right| \le r_{\mathrm{outer}}.
+\end{controleq}
+
+\paragraph{Inner Loop (Air $\rightarrow$ Heater).}
+The inner PID loop directly controls the heater power \(Q\) to maintain the air temperature near \(T_{\mathrm{air,set}}\). 
+It is the ``fast'' loop in the system. 
+Derivative filtering and output saturation prevent noisy or aggressive responses, while a slew-rate limit ensures smooth heater transitions:
+\begin{controleq}\label{eq:heater_slew}
+\left|\frac{dQ}{dt}\right| \le \SI{13}{\watt\per\second}.
+\end{controleq}
+
+Together, these two loops ensure that the core temperature reaches \SI{65}{\celsius} efficiently without exceeding the safety limits of the air or the polyurethane enclosure.
+
+\subsection{Airflow Control and Supervisory Logic}
+Temperature control alone is insufficient for safe operation; proper airflow is also necessary to manage heat transfer and prevent local overheating. 
+The air movement inside the box is governed by a combination of low-level PIDs (for fan and valve actuation) and a higher-level "smart" supervisor that adapts the airflow to the current operating phase.
+
+\begin{enumerate}[label=\alph*)]
+  \item \textbf{Regulatory PIDs.}  
+  The fan, inlet, and outlet valves are each managed by PID or PI controllers that respond to temperature or pressure deviations. 
+  A pressure PI controller maintains a target differential pressure \(\Delta p\), which defines the total air mass flow rate:
+  \begin{controleq}\label{eq:massflow_control}
+  \dot m = \rho\,C_dA\,\sqrt{\frac{2\,\Delta p}{\rho}},
+  \end{controleq}
+  as given previously in \cref{eq:mass_flow_orifice}.  
+  All actuator commands are rate-limited (\(\le \SI{0.03}{\per\second}\)) to avoid unrealistic movements.
+
+  \item \textbf{Supervisory Airflow Layer.}  
+  In addition to regulatory PIDs, a logic-based layer determines the overall airflow strategy. 
+  It switches smoothly between three regimes depending on the current thermal state:
+  \begin{itemize}
+      \item \textbf{Heat-up:} high airflow for rapid temperature uniformity and safety.
+      \item \textbf{Track/Hold:} moderate airflow to maintain stability and efficiency.
+      \item \textbf{Safety/Vent:} increased outlet flow when the air temperature approaches the cap, allowing fast cooling and moisture removal.
+  \end{itemize}
+  A minimum airflow is always maintained to prevent stagnation.
 \end{enumerate}
+
+\subsection{Stability and Safety Measures}
+To ensure that the model behaves realistically and safely, several protections are integrated:
+\begin{itemize}
+  \item Derivative filtering and capping prevent oscillations caused by noisy temperature readings.
+  \item Thermal rate limiting constrains \(\mathrm{d}T_{\mathrm{air}}/\mathrm{d}t\) to a physically safe value.
+  \item Radiative heat transfer is always calculated using absolute temperature \((T+273.15)^4\) to ensure consistency with \cref{eq:rad}.
+  \item A cold run guard ensures minimum heating and airflow if \(T_{\mathrm{air}}<T_{\mathrm{amb}}\), preventing stagnation during startup.
+  \item The air temperature set point is clamped to \([\SI{40}{\celsius},\,T_{\mathrm{cap}}]\) with antiwindup limits on the integrator.
+  \item The maximum air temperature is capped at \SI{69}{\celsius} to protect the polyurethane walls.
+\end{itemize}
+
+\subsection{Signal Flow Summary}
+The final structure of the control system is summarized below:
+\begin{itemize}
+  \item \textbf{Outer Loop (Core Regulation):} \(T_{\mathrm{core}} \rightarrow\) PI \(\rightarrow T_{\mathrm{air,set}}\)
+  \item \textbf{Inner Loop (Air Regulation):} \(T_{\mathrm{air}},\,T_{\mathrm{air,set}} \rightarrow\) PID \(\rightarrow Q\)
+  \item \textbf{Airflow Layer:} \((T_{\mathrm{air}},\,\Delta p) \rightarrow\) fan and valve PIDs (rate-limited) with supervisory blending across heat-up, steady, and safety modes
+\end{itemize}
+
+This hybrid control structure ensures efficient and safe operation of the oven. 
+The heater maintains the desired core temperature through coordinated air control, while the airflow system prevents overheating and supports uniform drying conditions. 
+The result is a robust, physically realistic control design that mirrors industrial heating systems on a smaller experimental scale.
+
+
+\section{Project Designs for the Hotbox}
+\subsection{Issues in the Previous Designs}
+\begin{itemize}
+  \item \markhere{io_text}%
+        Inlets and outlets were not arranged to allow docking between multiple units (see \cref{fig:io_issue}).
+  \begin{figure}[H]
+    \centering
+    \includegraphics[width=0.5\linewidth]{Old_box_design.jpg}
+    \caption{Inlet/outlet geometry misalignment preventing docking between boxes. \backtotext{io_text}}
+    \label{fig:io_issue}
+  \end{figure}
+
+  \item \markhere{servo_text}%
+        The flow control system introduced excessive friction, exceeding the servo torque capacity (see \cref{fig:servo_friction}).
+  \begin{figure}[H]
+    \centering
+    \includegraphics[width=0.5\linewidth]{Old_flow_control_design.jpg}
+    \caption{Friction in flow control leading to servo stall. \backtotext{servo_text}}
+    \label{fig:servo_friction}
+  \end{figure}
+\end{itemize}
+
+\subsection{Design Upgrades}
+\begin{itemize}
+  \item \markhere{itm:coupling}%
+        A coupling mechanism was introduced to allow connection between multiple units (see \cref{fig:coupling}).
+  \begin{figure}[H]
+    \centering
+    \includegraphics[width=0.5\linewidth]{docking_mechanism.jpg}
+    \caption{Coupling mechanism enabling docking of multiple units. \backtotext{itm:coupling}}
+    \label{fig:coupling}
+  \end{figure}
+
+  \item \markhere{itm:servo}%
+        The servomotor mounts were integrated into the structure to allow controlled actuation (see \cref{fig:servo_mounts}).
+  \begin{figure}[H]
+    \centering
+    \includegraphics[width=0.5\linewidth]{Valve_system_with_servo_mount.jpg}
+    \caption{Integrated servomotor mounts for controlled actuation. \backtotext{itm:servo}}
+    \label{fig:servo_mounts}
+  \end{figure}
+
+  \item Butterfly valves (as depicted in \cref{fig:servo_mounts}) were adopted for airflow regulation, providing an efficient means of controlling the entry and exit passages.
+\end{itemize}
+
+\subsection{Design Failures}
+\begin{itemize}
+  \item \markhere{itm:butterfly}%
+        An incorrect estimate of clearance requirements led to five unsuccessful butterfly-valve stem prototypes (see \cref{fig:butterfly_fail}).
+  \begin{figure}[H]
+    \centering
+    \includegraphics[width=0.5\linewidth]{Broken_discs.jpg}
+    \caption{Unsuccessful butterfly valve stem prototypes caused by incorrect clearance estimates. \backtotext{itm:butterfly}}
+    \label{fig:butterfly_fail}
+  \end{figure}
+
+  \item \markhere{itm:filament}%
+        Two additional print defects occurred due to unsuitable filament (see \cref{fig:filament_defects}).
+  \begin{figure}[H]
+    \centering
+    \includegraphics[width=0.5\linewidth]{misaligned_print.jpg}
+    \caption{Print defects due to unsuitable filament. \backtotext{itm:filament}}
+    \label{fig:filament_defects}
+  \end{figure}
+\end{itemize}
+
+\subsection{Design Updates to Overcome Failures}
+\markhere{itm:new_valve}%
+The butterfly valve stem was redesigned from an ``internal configuration'' to an ``external configuration,'' improving reliability and simplifying assembly (see \cref{fig:new_valve_design}).
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.5\linewidth]{new_valve_design.jpg}
+    \caption{Newly designed butterfly valve system. \backtotext{itm:new_valve}}
+    \label{fig:new_valve_design}
+\end{figure}
 
 \section{Results}
-\begin{figure}[h!]
+\paragraph{Product temperatures.}
+\markhere{m:product_temps}%
+\Cref{fig:product_temps} shows core and surface temperatures vs.\ the target line. The surface runs hotter than the core, consistent with 1D conduction. The core approaches the target in a realistic time frame.
+\begin{figure}[htbp]
   \centering
   \includegraphics[width=0.9\linewidth]{fig_product_temps.png}
-  \caption{Product temperatures: core and surface vs.\ time with the target line.}
+  \caption{Product temperatures of the core and surface vs.\ time, compared with the target line. \backtotext{m:product_temps}}
+  \label{fig:product_temps}
 \end{figure}
 
-\begin{figure}[h!]
+\paragraph{Air temperature control.}
+\markhere{m:air_control}%
+\Cref{fig:air_control} illustrates the inner air loop. \(T_{\mathrm{air}}\) tracks \(T_{\mathrm{air,set}}\) while respecting the safety cap; the cascade prevents overshoot and preserves safety margins.
+\begin{figure}[htbp]
   \centering
   \includegraphics[width=0.9\linewidth]{fig_air_control.png}
-  \caption{Air temperature control: $T_{\text{air}}$, $T_{\text{air,set}}$, and cap.}
+  \caption{Air temperature control showing \(T_{\mathrm{air}}\), \(T_{\mathrm{air,set}}\), and the safety cap. \backtotext{m:air_control}}
+  \label{fig:air_control}
 \end{figure}
 
-\begin{figure}[h!]
+\paragraph{Heater and fan dynamics.}
+\markhere{m:heater_fan}%
+\Cref{fig:heater_fan} reports heater power (left axis) and fan duty (right). The heater is saturated for most of the warm-up; the fan ramps up to increase convection without exceeding the cap.
+\begin{figure}[htbp]
   \centering
   \includegraphics[width=0.9\linewidth]{fig_heater_fan.png}
-  \caption{Heater power (left axis) and fan duty (right axis).}
+  \caption{Heater power (left axis) and fan duty cycle (right axis). \backtotext{m:heater_fan}}
+  \label{fig:heater_fan}
 \end{figure}
 
-\begin{figure}[h!]
+\paragraph{Airflow and pressure.}
+\markhere{m:flows_pressure}%
+\Cref{fig:flows_pressure} groups inlet flows, outlet flows, and total flow with \(\Delta p\). Smoothed traces confirm the purge modulation; \(\Delta p\) correlates with flow, validating the aerodynamic submodel.
+\begin{figure}[htbp]
   \centering
   \begin{subfigure}{0.9\linewidth}
-    \centering
-    \includegraphics[width=\linewidth]{fig_inlet_flows.png}
-    \caption{Inlet flows (smoothed).}
-  \end{subfigure}\\[0.75em]
+    \centering\includegraphics[width=\linewidth]{fig_inlet_flows.png}
+    \caption{Inlet flows (smoothed).}\label{fig:inlet_flows}
+  \end{subfigure}\par\vspace{0.75em}
   \begin{subfigure}{0.9\linewidth}
-    \centering
-    \includegraphics[width=\linewidth]{fig_outlet_flows.png}
-    \caption{Outlet flows (smoothed).}
-  \end{subfigure}\\[0.75em]
+    \centering\includegraphics[width=\linewidth]{fig_outlet_flows.png}
+    \caption{Outlet flows (smoothed).}\label{fig:outlet_flows}
+  \end{subfigure}\par\vspace{0.75em}
   \begin{subfigure}{0.9\linewidth}
-    \centering
-    \includegraphics[width=\linewidth]{fig_total_flow_dp.png}
-    \caption{Total air flow  and $\Delta p$ (smoothed).}
+    \centering\includegraphics[width=\linewidth]{fig_total_flow_dp.png}
+    \caption{Total airflow and \(\Delta p\) (smoothed).}\label{fig:total_flow_dp}
   \end{subfigure}
-  \caption{Flows and pressure.}
+  \caption{Airflow and pressure distributions during operation. \backtotext{m:flows_pressure}}
+  \label{fig:flows_pressure}
 \end{figure}
 
-\begin{figure}[h!]
+\paragraph{Heat distribution.}
+\markhere{m:heatmap}%
+\Cref{fig:heatmap} shows the through-thickness temperature map. The surface warms faster than the core; the smooth profile is consistent with the conduction model plus the resistance of the film.
+\begin{figure}[htbp]
   \centering
   \includegraphics[width=0.9\linewidth]{fig_heatmap.png}
-  \caption{Through-thickness heat map for the half-thickness slab.}
+  \caption{Through-thickness temperature distribution for the half-thickness slab. \backtotext{m:heatmap}}
+  \label{fig:heatmap}
 \end{figure}
 
-\section{Sensitivity \& Limits}
-\textbf{Heater power} is the main limiter. With \SI{60}{W} and a steady air flow  near \SI{3}{g/s}, steady air settles near \SI{61}--\SI{62}{\celsius}, and the core tracks closely. Lower air flow  raises temperature; higher air flow  cools it. Better insulation (lower $U_{\text{loss}}$) or a higher safe cap would also raise the maximum.
+\section{Discussion}
+\begin{itemize}
+  \item The core temperature approaches the target in a realistic time; the surface runs hotter, consistent with 1D conduction.
+  \item The air temperature never exceeds the safety cap, demonstrating an effective cascade control and purge strategy.
+  \item The heating power is saturated during most of the warm-up, confirming the power as the limiting factor.
+  \item Purge flow slows warm-up, but improves hold stability by preventing air overshoot.
+  \item The fan increases \(h_{\mathrm{prod}}\) and accelerates core heating, but pushes air temperature closer to the cap.
+\end{itemize}
+With \SI{60}{\watt} and moderate airflow, the system cannot reach \SI{65}{\celsius}; it stabilizes near \SI{61}{\celsius}.
 
-\section{Implementation Plan (real hardware)}
+\section{Sensitivity and Limits}
+\textbf{Heater power} is the main limiter. With \SI{60}{\watt} and \(\approx\)\SI{3}{\gram\per\second} airflow, air stabilizes around \SIrange{61}{62}{\celsius}, with the core close behind. Lower airflow increases temperature; higher airflow decreases it. Better insulation (lower \(U_{\mathrm{loss}}\)) or a higher safety cap would raise the maximum.
+
+\section{Implementation Plan for Real Hardware}
 \begin{enumerate}
-  \item \textbf{Calibrate}: valve duty $\rightarrow$ flow ($C_dA$), fan duty $\rightarrow h$ gain, heater PWM $\rightarrow$ watts.
-  \item \textbf{Safety}: hard over-temperature cutoff, door switch, fuse.
-  \item \textbf{Controllers}: same cascade with the same rate limits and guards.
-  \item \textbf{Commissioning order}: short pre-air flow  (higher flow), enable inner loop, then outer loop; tune gently.
-  \item \textbf{Logging}: record temperatures, flows, heater/fan duty to compare with the model.
+  \item \textbf{Calibration}: map valve duty to flow (\(C_dA\)), the fan duty to \(h\), and the PWM of the heater to power (W).
+  \item \textbf{Safety}: hard over-temperature cutoff, door interlock, and fuse protection.
+  \item \textbf{Controllers}: same cascade with identical rate limits and guards.
+  \item \textbf{Commissioning}: short pre-flow at higher airflow; enable inner loop, then outer; tune cautiously.
+  \item \textbf{Logging}: record temperatures, flows, and heater/fan duty cycles for comparison with the model.
 \end{enumerate}
 
-\section{Limitations \& Future Work}
-The air and wall are lumped, so hot spots are not captured. The air flow  model uses effective $C_dA$, so real ducting and fan curves will change scaling. A simple feed-forward on the heater (based on a desired ramp rate) could reduce integral action. Adding paint thermal resistance explicitly (film + half-thickness) would improve fidelity.
+\section{Limitations and Future Work}
+\begin{itemize}
+  \item The air and the wall are lumped, so the local hot spots are not represented.
+  \item Airflow uses an effective \(C_dA\); real duct/fan curves will need scaling.
+  \item A simple heater feedforward (defined ramp rate) could reduce the integral action.
+  \item Explicit paint thermal resistance (film + half-thickness) would improve fidelity.
+\end{itemize}
 
 \section{Conclusions}
-A simple cascade controller plus a smart air flow  policy can heat and hold a coated product safely in a small box while respecting an air cap. With \SI{60}{W} and moderate air flow , physics limits steady air to the low \SI{60}{\celsius}. The final code is numerically stable, respects safety caps, and gives clean diagnostics that are useful for real implementation.
-
-\section*{References}
-\begin{enumerate}
-  \item Standard heat transfer relations for convection/radiation (e.g., Incropera).
-  \item Basic control references for PID anti-windup and cascade control.
-\end{enumerate}
+A simple cascade controller with a smart airflow policy safely heats and holds a coated product while maintaining an air cap. With \SI{60}{\watt} and moderate airflow, physical constraints limit steady air to the low \SI{60}{\celsius} range. The implementation is numerically stable, respects safety caps, and provides diagnostics that support hardware deployment.
 
 \appendix
+\section{Key Equations (references)}
+Air balance (\cref{eq:air_balance}); wall balance (\cref{eq:wall_balance}); radiation (\cref{eq:rad}); convection reminder (\cref{eq:h_def}); mass balance (\cref{eq:mass_balance}); orifice flow (\cref{eq:mass_flow_orifice}).
 
-\section{Key Equations}
-Air node (Eq.~\ref{eq:air}); radiation in Kelvin with a temperature floor; explicit 1D conduction scheme with adiabatic mid-plane; air flow $\dot m \propto C_dA \sqrt{2\Delta p/\rho}$ with enforced mass balance.
-
-\section{Main Parameters (fill with your final values)}
+\section{Main Parameters (fill with final values)}
 \begin{table}[h!]
 \centering
 \begin{tabular}{@{}lll@{}}
 \toprule
 Symbol & Meaning & Value / Units \\
 \midrule
-$Q_{\max}$ & Max heater power & \SI{60}{W} \\
-$T_{\text{amb}}$ & Ambient temperature & \SI{25}{\celsius} \\
-$T_{\text{air,cap}}$ & Air temperature cap & \SI{70}{\celsius} \\
-$A_{\text{prod}}$ & Product area & \SI{0.015}{m^2} \\
-thickness & Total thickness & \SI{10}{mm} \\
-$N$ & Layers (half thickness) & $3$ \\
-$\varepsilon$ & Emissivity & $0.8$ \\
-$U_{\text{loss}}$ & Box leakage & \SI{1}{W/K} \\
-air flow  (hold) & Target total & $\sim \SI{3}{g/s}$ \\
+\(Q_{\max}\) & Max heater power & \SI{60}{\watt} \\
+\(T_{\mathrm{amb}}\) & Ambient temperature & \SI{25}{\celsius} \\
+\(T_{\mathrm{air,cap}}\) & Air temperature cap & \SI{70}{\celsius} \\
+\(A_{\mathrm{prod}}\) & Product area & \SI{0.015}{\meter^2} \\
+thickness & Total thickness & \SI{10}{\milli\meter} \\
+\(N\) & Layers (half thickness) & 3 \\
+\(\varepsilon\) & Emissivity & 0.8 \\
+\(U_{\mathrm{loss}}\) & Leakage & \SI{1}{\watt\per\kelvin} \\
+Airflow (hold) & Target total & \(\sim\)\SI{3}{\gram\per\second} \\
 \bottomrule
 \end{tabular}
 \caption{Key parameters used in the final simulation.}
 \end{table}
 
-\section{Reproduction Checklist}
-\begin{itemize}
-  \item MATLAB R20xx, code file: \texttt{ULTIMATE\_OVEN\_8L\_FINAL\_SMOOTH\_KP\_SAFE.m}.
-  \item Solver: \texttt{ode15s}; tolerances as listed.
-  \item Export plots as PNGs with names used in this document and place them next to the \texttt{.tex} file.
-\end{itemize}
+\section{Embedded Implementation: Pico W Hybrid Thermostat to Servo}
+
+\paragraph{Overview.}
+A robust MicroPython loop maps the temperature to a servo position with smoothing, hysteresis, deadband, and slew limiting. The servo is powered from 5\,V (common ground with the Pico). No Wi-Fi is required.
+
+\paragraph{Wiring.}
+Provide 5\,V to the servo (\(+\) and GND) and connect the servo signal to \texttt{GP1}. Share GND between the servo supply and the Pico. The internal temperature sensor is read on \texttt{ADC4}; for production, replace it with an external sensor (e.g., NTC on \texttt{ADC0--ADC3} or a digital sensor).
+
+\clearpage
+\paragraph{Code.}
+\begin{lstlisting}[style=picode,caption={Pico W: robust hybrid thermostat driving a hobby servo (GP1).},label={lst:pico_thermostat}]
+from machine import Pin, PWM, ADC
+import time
+
+# ========= USER SETTINGS =========
+SERVO_PIN       = 1          # PWM pin to servo signal (GP1)
+SERVO_FREQ_HZ   = 50         # hobby servos use ~50 Hz
+CLOSED_US       = 1000       # pulse width for "closed"
+OPEN_US         = 2000       # pulse width for "open"
+REVERSED        = False      # True to invert motion
+
+# Temperature thresholds (\textdegree C)
+T_LOW           = 18.0       # <= T_LOW  -> CLOSED
+T_HIGH          = 22.0       # >= T_HIGH -> OPEN
+
+# Robustness
+TEMP_ALPHA      = 0.25       # EMA smoothing (0..1)
+EDGE_HYST       = 0.5        # extra C stickiness at edges
+DEADBAND_US     = 6          # ignore pulse changes <= this
+RAMP_US_PER_S   = 400        # limit speed (us/s)
+WARMUP_S        = 2.0        # ADC settle
+
+# Loop timing & telemetry
+UPDATE_HZ       = 10
+PRINT_EVERY_S   = 1.0
+
+# Optional temperature calibration
+TEMP_OFFSET_C   = 0.0
+TEMP_SCALE      = 1.0
+# =================================
+
+def clamp(v, lo, hi): return lo if v < lo else hi if v > hi else v
+def lerp(a, b, x):    return a + (b - a) * x
+
+# ---- Servo setup ----
+servo = PWM(Pin(SERVO_PIN)); servo.freq(SERVO_FREQ_HZ)
+_period_us = 1_000_000 // SERVO_FREQ_HZ  # 20_000 for 50 Hz
+
+def _apply_reverse(us):
+    if not REVERSED: return us
+    mid = (CLOSED_US + OPEN_US) // 2
+    return mid - (us - mid)
+
+def write_us(us):
+    us = clamp(us, min(CLOSED_US, OPEN_US), max(CLOSED_US, OPEN_US))
+    us = _apply_reverse(us)
+    servo.duty_u16(int(us * 65535 // _period_us))
+
+# ---- Internal temperature (ADC4) ----
+adc = ADC(4)
+VREF, ADC_MAX = 3.3, 65535
+
+def read_temp_c_raw():
+    v = adc.read_u16() * VREF / ADC_MAX
+    return 27.0 - (v - 0.706) / 0.001721  # RP2040 datasheet
+
+def read_temp_c():
+    t = read_temp_c_raw()
+    return (t + TEMP_OFFSET_C) * TEMP_SCALE
+
+# ---- Mapping with hysteresis & smoothing ----
+def temp_to_target_us(t):
+    if t <= (T_LOW - EDGE_HYST):  return CLOSED_US
+    if t >= (T_HIGH + EDGE_HYST): return OPEN_US
+    x = clamp((t - T_LOW) / (T_HIGH - T_LOW), 0.0, 1.0)
+    return int(lerp(CLOSED_US, OPEN_US, x))
+
+dt = 1.0 / UPDATE_HZ
+failsafe = (CLOSED_US + OPEN_US) // 2
+tele_next = time.ticks_ms()
+
+print("Hybrid thermostat (robust) running. Ctrl+C to stop.")
+t_avg = read_temp_c()
+write_us(failsafe)
+
+# Warm-up ADC
+t0 = time.ticks_ms()
+while (time.ticks_ms() - t0) < int(WARMUP_S * 1000):
+    t_avg = TEMP_ALPHA * read_temp_c() + (1.0 - TEMP_ALPHA) * t_avg
+    time.sleep(0.05)
+
+current_us = temp_to_target_us(t_avg)
+write_us(current_us)
+
+try:
+    while True:
+        loop_start = time.ticks_ms()
+
+        t_now = read_temp_c()
+        t_avg = TEMP_ALPHA * t_now + (1.0 - TEMP_ALPHA) * t_avg
+
+        target_us = temp_to_target_us(t_avg)
+        max_step = int(RAMP_US_PER_S * dt)
+        if target_us > current_us + max_step:
+            target_us = current_us + max_step
+        elif target_us < current_us - max_step:
+            target_us = current_us - max_step
+
+        if abs(target_us - current_us) > DEADBAND_US:
+            write_us(target_us)
+            current_us = target_us
+
+        if time.ticks_diff(time.ticks_ms(), tele_next) >= 0:
+            zone = ('CLOSED' if current_us <= CLOSED_US
+                    else 'OPEN' if current_us >= OPEN_US else 'MIX')
+            print(f"T={t_avg:5.2f} C  pulse={current_us} us  zone={zone}")
+            tele_next = time.ticks_add(tele_next, int(PRINT_EVERY_S * 1000))
+
+        elapsed = time.ticks_diff(time.ticks_ms(), loop_start) / 1000.0
+        sleep_left = dt - elapsed
+        if sleep_left > 0:
+            time.sleep(sleep_left)
+
+except KeyboardInterrupt:
+    pass
+finally:
+    servo.deinit()
+    print("Stopped.")
+\end{lstlisting}
+
+\paragraph{Reminder:}
+EMA smoothing and edge hysteresis prevent jitter at the threshold; deadband avoids tiny writes; slew limiting protects the mechanics; a warm-up phase stabilizes the ADC; and a mid-pulse failsafe avoids abrupt motion on boot.
 
 \end{document}
