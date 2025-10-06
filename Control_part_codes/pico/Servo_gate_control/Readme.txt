@@ -4,4 +4,4 @@ There are 4 versions of the code, each of them are using PID control. You can ru
 
 To test the code you need some basic hardwares: 1 basic Raspberry board (for example I use Raspberry Pi Pico W in this case, and don't forget about the USB cable so you can connect it to your PC); a breadboard to simplify the wiring; some wires of jumpers; a 5V power source.
 The reason I use 5V power source is that if you use the 3.3V voltage that the Rspberry board provided, usually it is not enough to power up even the mini servo motor you can find on the market.
-About the detialed wiring, you can check on this link: https://picozero.readthedocs.io/en/latest/recipes.html#servo
+About the detialed wiring, you can check on this link: https://picozero.readthedocs.io/en/latest/recipes.html#servo; pay attention even as shown on the website, probably you still need a 5V power source rather than simply connect the servo to your Raspberry board.
