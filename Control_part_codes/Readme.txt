@@ -1,0 +1,1 @@
+For all the codes in this folder I use Thonny as the IDE to write codes for Raspberry Pi Pico W.
