@@ -1,5 +1,7 @@
 # Possible Bill of Materials (BoM) — Car Battery Thermal Control Prototype
 
+## NOT THE FINAL VERSION
+
 Version: 0.1 (draft)  
 Scope: Hot-box prototype for battery thermal conditioning with **Raspberry Pi Pico W** control, **12 V Sunon fan**, heater, and temperature/pressure sensing.
 
