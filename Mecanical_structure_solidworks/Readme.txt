@@ -1,0 +1,1 @@
+In this folder you will see some 3D part files that we created via Solidworks. Be aware that these parts are just used in our specific project and may not suitable for your own project.
