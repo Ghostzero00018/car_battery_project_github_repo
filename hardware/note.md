@@ -4,7 +4,7 @@ Version: 0.1 (draft)
 
 These notes capture practical tips, gotchas, and short procedures for the **hot-box battery thermal control** prototype.
 
----
+## NOT THE FINAL VERSION
 
 ## 1) Safety First (must-read)
 
